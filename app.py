@@ -118,7 +118,7 @@ if verificar_senha():
         st.subheader("🛡️ Gestão de Risco")
         capital_risco = st.number_input("Capital a Arriscar (R$ / US$)", value=100.0, step=50.0)
         alvo_fib_gain = st.slider("Alvo Gain (%)", min_value=1.0, max_value=10.0, value=3.0, step=0.5)
-         stop_loss_pct = st.slider("Stop Loss (%)", min_value=0.5, max_value=5.0, value=1.5, step=0.5)
+        stop_loss_pct = st.slider("Stop Loss (%)", min_value=0.5, max_value=5.0, value=1.5, step=0.5)
 
         st.markdown("---")
         st.subheader("📡 Status do Feed")
@@ -318,7 +318,6 @@ if verificar_senha():
                 st.write(f"* **Direção Indicada:** **{tipo_ultimo_sinal}**")
                 st.write(f"* **Confirmação por Volume:** {'✅ Spike de Volume Detectado (Forte)' if df_dados['Vol_Spike'].iloc[-1] else '⚠️ Volume Dentro da Média'}")
                 
-                # Verificação de Alerta em tempo real com componente visual animado
                 hora_atual_minutos = agora_br.hour * 60 + agora_br.minute
                 horario_entrada_minutos = ultimo_sinal_tempo.hour * 60 + ultimo_sinal_tempo.minute
                 
