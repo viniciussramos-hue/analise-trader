@@ -43,6 +43,14 @@ st.markdown("""
             font-weight: bold;
             text-align: center;
         }
+        .buscando-status {
+            background-color: #1f2937;
+            padding: 12px;
+            border-radius: 8px;
+            border-left: 4px solid #3b82f6;
+            color: #93c5fd;
+            font-weight: 500;
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -93,35 +101,30 @@ def carregar_dados(ticker, periodo, intervalo):
 
 # --- Função para Verificar se o Mercado está Aberto ---
 def checar_status_mercado(categoria, agora):
-    dia_semana = agora.weekday() # 0 = Segunda, 5 = Sábado, 6 = Domingo
+    dia_semana = agora.weekday()
     hora = agora.hour
     minuto = agora.minute
     hora_decimal = hora + minuto / 60.0
 
-    # Finais de semana (exceto cripto)
     if dia_semana >= 5:
         if categoria == "Criptomoedas":
             return "🟢 Mercado Aberto (24/7)", "success"
         else:
             return "🔴 Mercado Fechado (Fim de Semana)", "error"
 
-    # Dias úteis (Segunda a Sexta)
     if categoria == "Criptomoedas":
         return "🟢 Mercado Aberto (24/7)", "success"
     elif categoria == "Ações B3":
-        # Pregão B3: 10:00 às 17:00 (horário de brasília)
         if 10.0 <= hora_decimal <= 17.0:
             return "🟢 Pregão B3 Aberto", "success"
         else:
             return "🔴 Pregão B3 Fechado", "error"
     elif categoria == "Forex (Moedas)":
-        # Forex opera 24h de segunda a sexta
         return "🟢 Mercado Forex Aberto", "success"
     else:
-        # Índices e Globais
         return "🟢 Mercado Operando", "success"
 
-# --- Inicialização da Carteira Simulada no Session State ---
+# --- Inicialização da Carteira Simulada ---
 if "historico_ordens" not in st.session_state:
     st.session_state.historico_ordens = []
 
@@ -264,7 +267,7 @@ if verificar_senha():
         ema9_atual = float(df_dados['EMA_9'].iloc[-1])
         ema21_atual = float(df_dados['EMA_21'].iloc[-1])
 
-        # Backtest simples de assertividade (Win Rate no histórico recente)
+        # Backtest de Assertividade
         total_sinais = len(df_dados[df_dados['Sinal'] != 0])
         if total_sinais > 0:
             df_dados['Retorno_Futuro'] = df_dados['Close'].shift(-3) - df_dados['Close']
@@ -273,20 +276,36 @@ if verificar_senha():
         else:
             win_rate = 50.0
 
-        # Horários Calculados
-        ultimo_sinal_tempo = df_dados[df_dados['Sinal'] != 0].index[-1] if not df_dados[df_dados['Sinal'] != 0].empty else df_dados.index[-1]
-        tipo_ultimo_sinal = "COMPRA (Call)" if not df_dados[df_dados['Sinal'] != 0].empty and df_dados[df_dados['Sinal'] != 0]['Sinal'].iloc[-1] == 1 else "VENDA (Put)"
-        
-        horario_entrada_str = ultimo_sinal_tempo.strftime('%H:%M')
+        # --- Verificação Inteligente de Robô (Buscando vs Parado) ---
+        sinais_existentes = df_dados[df_dados['Sinal'] != 0]
+        if not sinais_existentes.empty:
+            ultimo_sinal_tempo = sinais_existentes.index[-1]
+            tipo_ultimo_sinal = "COMPRA (Call)" if sinais_existentes['Sinal'].iloc[-1] == 1 else "VENDA (Put)"
+            horario_entrada_str = ultimo_sinal_tempo.strftime('%H:%M')
+            
+            multiplicador_minutos = 1
+            if "m" in intervalo:
+                multiplicador_minutos = int(intervalo.replace("m", ""))
+            elif "h" in intervalo:
+                multiplicador_minutos = int(intervalo.replace("h", "")) * 60
 
-        multiplicador_minutos = 1
-        if "m" in intervalo:
-            multiplicador_minutos = int(intervalo.replace("m", ""))
-        elif "h" in intervalo:
-            multiplicador_minutos = int(intervalo.replace("h", "")) * 60
+            horario_saida_previsto = ultimo_sinal_tempo + timedelta(minutes=multiplicador_minutos * 4)
+            horario_saida_str = horario_saida_previsto.strftime('%H:%M')
 
-        horario_saida_previsto = ultimo_sinal_tempo + timedelta(minutes=multiplicador_minutos * 4)
-        horario_saida_str = horario_saida_previsto.strftime('%H:%M')
+            # Verifica se o último sinal ocorreu nos últimos 15 minutos (janela de atividade recente)
+            diferenca_minutos = (agora_br - ultimo_sinal_tempo.astimezone(fuso_br)).total_seconds() / 60.0
+            if abs(diferenca_minutos) <= 15:
+                status_robo_txt = f"🚨 GATILHO ATIVO! Entrada às {horario_entrada_str} | Saída: {horario_saida_str}"
+                robô_buscando = True
+            else:
+                status_robo_txt = f"🔍 Robô em varredura contínua (Último sinal foi às {horario_entrada_str}. Aguardando novo cruzamento...)"
+                robô_buscando = False
+        else:
+            horario_entrada_str = "Aguardando..."
+            horario_saida_str = "Aguardando..."
+            tipo_ultimo_sinal = "Neutro"
+            status_robo_txt = "🔍 Robô escaneando o mercado em busca de novos setups..."
+            robô_buscando = False
 
         # --- Navegação ---
         if modulo_selecionado == "Visão Geral":
@@ -294,15 +313,12 @@ if verificar_senha():
             
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("Preço / Cotação (BRT)", f"{preco_atual:.4f}", f"{variacao_pct:.2f}%")
-            col2.metric("Status do Mercado", status_mercado_txt.split()[1] if len(status_mercado_txt.split()) > 1 else "Operando", "Feed Ativo")
-            col3.metric("Entrada / Saída Alvo", f"{horario_entrada_str} ➔ {horario_saida_str}", tipo_ultimo_sinal)
-            col4.metric("Assertividade (Win Rate)", f"{win_rate:.1f}%", "Histórico")
+            col2.metric("Status do Robô", "Buscando Entradas" if robô_buscando else "Varredura Ativa", "Monitorando")
+            col3.metric("Tendência Atual", "Alta" if ema9_atual > ema21_atual else "Baixa", "EMA 9/21")
+            col4.metric("Assertividade", f"{win_rate:.1f}%", "Histórico")
             
             st.markdown("---")
-            if "Aberto" in status_mercado_txt:
-                st.success(f"🟢 **Mercado em Operação:** O ativo `{ativo_escolhido}` está sendo negociado no momento. Acompanhe os gatilhos em tempo real.")
-            else:
-                st.warning(f"🔴 **Mercado Fechado:** O ativo `{ativo_escolhido}` está com pregão encerrado. Os dados exibidos refletem o último fechamento oficial.")
+            st.info(f"💡 **Status de Varredura:** `{status_robo_txt}`")
 
         elif modulo_selecionado == "Gráficos & Análise":
             st.subheader(f"📈 Gráfico Institucional Avançado — {ativo_escolhido} [{intervalo}]")
@@ -366,12 +382,13 @@ if verificar_senha():
             col_s1, col_s2 = st.columns(2)
             
             with col_s1:
-                st.markdown("### 🤖 Robô Analisador & Simulador de Ordens")
+                st.markdown("### 🤖 Robô Analisador & Varredura de Mercado")
                 st.write(f"* **Status do Mercado:** {status_mercado_txt}")
-                st.write(f"* **Horário Calculado de Entrada:** **{horario_entrada_str}**")
-                st.write(f"* **Previsão Estimada de Saída:** **{horario_saida_str}**")
-                st.write(f"* **Direção Indicada:** **{tipo_ultimo_sinal}**")
+                st.markdown(f'<div class="buscando-status">{status_robo_txt}</div>', unsafe_allow_html=True)
+                st.write(f"* **Direção do Último Setup:** **{tipo_ultimo_sinal}**")
+                st.write(f"* **Taxa de Acerto (Win Rate):** **{win_rate:.1f}%**")
                 
+                # Botão corrigido para usar o ativo_escolhido atual
                 if st.button("🚀 Executar Ordem Simulada (Paper Trading)", use_container_width=True):
                     nova_ordem = {
                         "Ativo": ativo_escolhido,
@@ -381,16 +398,8 @@ if verificar_senha():
                         "Status": "Aberta (Simulada)"
                     }
                     st.session_state.historico_ordens.append(nova_ordem)
-                    st.success("✅ Ordem simulada registrada com sucesso na carteira paper trading!")
+                    st.success(f"✅ Ordem simulada para **{ativo_escolhido}** registrada com sucesso!")
 
-                hora_atual_minutos = agora_br.hour * 60 + agora_br.minute
-                horario_entrada_minutos = ultimo_sinal_tempo.hour * 60 + ultimo_sinal_tempo.minute
-                
-                if "Aberto" in status_mercado_txt and abs(hora_atual_minutos - horario_entrada_minutos) <= 2:
-                    st.markdown(f'<div class="alerta-pisca">🚨 ALERTA MÁXIMO: HORA DE EXECUTAR A {tipo_ultimo_sinal} AGORA ({horario_entrada_str})!</div>', unsafe_allow_html=True)
-                else:
-                    st.info(f"⏳ Status: {status_mercado_txt}. Janela alvo às {horario_entrada_str}.")
-            
             with col_s2:
                 st.markdown("### 🎯 Calculadora de Risco x Retorno")
                 preco_stop = preco_atual * (1 - stop_loss_pct / 100) if "COMPRA" in tipo_ultimo_sinal else preco_atual * (1 + stop_loss_pct / 100)
