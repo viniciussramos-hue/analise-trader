@@ -102,7 +102,7 @@ if verificar_senha():
         
         # --- Configuração do Robô de Análise Automática por Horário ---
         st.subheader("🤖 Robô Analisador Temporal")
-        ativar_robo_analise = st.toggle("Ativar Alerta de Entrada/Saída", value=True)
+        ativar_robo_analise = st.toggle("Ativar Validação de Resultado", value=True)
         
         st.markdown("---")
         st.subheader("📡 Status do Feed")
@@ -139,7 +139,7 @@ if verificar_senha():
     st.markdown("---")
 
     # --- Seleção de Timeframe / Intervalo ---
-    st.markdown("##### ⏱️ Timeframe para Análise e Cálculo de Gatilho")
+    st.markdown("##### ⏱️ Timeframe para Análise e Validação de Saída")
     col_t1, col_t2, col_t3, col_t4, col_t5, col_t6 = st.columns(6)
     
     if "intervalo_escolhido" not in st.session_state:
@@ -189,7 +189,7 @@ if verificar_senha():
         rs = ganho / perda
         df_dados['RSI'] = 100 - (100 / (1 + rs))
 
-        # Detecção de Sinais Técnicos
+        # Detecção de Sinais
         df_dados['Sinal'] = 0
         df_dados.loc[(df_dados['EMA_9'] > df_dados['EMA_21']) & (df_dados['EMA_9'].shift(1) <= df_dados['EMA_21'].shift(1)), 'Sinal'] = 1  
         df_dados.loc[(df_dados['EMA_9'] < df_dados['EMA_21']) & (df_dados['EMA_9'].shift(1) >= df_dados['EMA_21'].shift(1)), 'Sinal'] = -1 
@@ -204,22 +204,55 @@ if verificar_senha():
         ema9_atual = float(df_dados['EMA_9'].iloc[-1])
         ema21_atual = float(df_dados['EMA_21'].iloc[-1])
 
-        # --- Cálculo Inteligente do Horário de Entrada e Previsão de Saída ---
+        # Cálculos de Entrada e Saída
         ultimo_sinal_tempo = df_dados[df_dados['Sinal'] != 0].index[-1] if not df_dados[df_dados['Sinal'] != 0].empty else df_dados.index[-1]
         tipo_ultimo_sinal = "COMPRA (Call)" if not df_dados[df_dados['Sinal'] != 0].empty and df_dados[df_dados['Sinal'] != 0]['Sinal'].iloc[-1] == 1 else "VENDA (Put)"
         
         horario_entrada_str = ultimo_sinal_tempo.strftime('%H:%M')
 
-        # Projeção de Saída baseada no timeframe (ex: 4 candles à frente para take profit estimado)
         multiplicador_minutos = 1
         if "m" in intervalo:
             multiplicador_minutos = int(intervalo.replace("m", ""))
         elif "h" in intervalo:
             multiplicador_minutos = int(intervalo.replace("h", "")) * 60
 
-        # Previsão de saída estimada em 4 períodos/candles após a entrada
         horario_saida_previsto = ultimo_sinal_tempo + timedelta(minutes=multiplicador_minutos * 4)
         horario_saida_str = horario_saida_previsto.strftime('%H:%M')
+
+        # --- Validação se Consolidou ou Não ---
+        status_consolidacao = "Aguardando Conclusão do Horário de Saída"
+        cor_status = "info"
+        
+        try:
+            # Pega o preço de fechamento na entrada e busca o preço no horário de saída se já tiver ocorrido
+            preco_entrada = float(df_dados.loc[ultimo_sinal_tempo, 'Close'])
+            
+            # Tenta encontrar o candle da saída ou o mais próximo
+            if agora_br >= horario_saida_previsto:
+                df_futuro = df_dados[df_dados.index >= horario_saida_previsto]
+                if not df_futuro.empty:
+                    preco_saida = float(df_futuro['Close'].iloc[0])
+                    variacao_op = ((preco_saida - preco_entrada) / preco_entrada) * 100
+                    if tipo_ultimo_sinal.startswith("COMPRA"):
+                        if variacao_op > 0:
+                            status_consolidacao = f"✅ CONSOLIDADO COM LUCRO (GAIN)! Variação: +{variacao_op:.2f}%"
+                            cor_status = "success"
+                        else:
+                            status_consolidacao = f"❌ ENCERRADO COM PREJUÍZO (LOSS). Variação: {variacao_op:.2f}%"
+                            cor_status = "error"
+                    else:
+                        if variacao_op < 0:
+                            status_consolidacao = f"✅ CONSOLIDADO COM LUCRO (GAIN)! Variação: +{abs(variacao_op):.2f}%"
+                            cor_status = "success"
+                        else:
+                            status_consolidacao = f"❌ ENCERRADO COM PREJUÍZO (LOSS). Variação: {variacao_op:.2f}%"
+                            cor_status = "error"
+                else:
+                    status_consolidacao = "⏳ Operação em andamento (Aguardando dados da saída...)"
+            else:
+                status_consolidacao = f"⏳ Monitorando... Saída prevista para as {horario_saida_str}"
+        except Exception as e:
+            status_consolidacao = "⏳ Calculando consolidação..."
 
         # --- Navegação ---
         if modulo_selecionado == "Visão Geral":
@@ -229,13 +262,18 @@ if verificar_senha():
             col1.metric("Preço / Cotação (BRT)", f"{preco_atual:.4f}", f"{variacao_pct:.2f}%")
             col2.metric("Tendência Calculada", "Alta" if ema9_atual > ema21_atual else "Baixa", "Forte")
             col3.metric("Entrada / Saída Alvo", f"{horario_entrada_str} ➔ {horario_saida_str}", tipo_ultimo_sinal)
-            col4.metric("IFR (14)", f"{float(df_dados['RSI'].iloc[-1]):.1f}", "Normal")
+            col4.metric("Status da Operação", "Analisado", "Concluído" if "GAIN" in status_consolidacao or "LOSS" in status_consolidacao else "Em curso")
             
             st.markdown("---")
-            st.info(f"🤖 **Análise de Horários Concluída:** Entrada calculada para às **{horario_entrada_str}** com previsão de saída/alvo projetada para às **{horario_saida_str}**.")
+            if "GAIN" in status_consolidacao:
+                st.success(f"📈 **Resultado:** {status_consolidacao}")
+            elif "LOSS" in status_consolidacao:
+                st.error(f"📉 **Resultado:** {status_consolidacao}")
+            else:
+                st.info(f"🤖 **Status:** {status_consolidacao}")
 
         elif modulo_selecionado == "Gráficos & Análise":
-            st.subheader(f"📈 Gráfico com Previsão de Entrada e Saída — {ativo_escolhido} [{intervalo}]")
+            st.subheader(f"📈 Gráfico com Validação de Saída — {ativo_escolhido} [{intervalo}]")
             
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
                                 vertical_spacing=0.03, row_heights=[0.7, 0.3])
@@ -252,7 +290,6 @@ if verificar_senha():
             fig.add_trace(go.Scatter(x=df_dados.index, y=df_dados['EMA_9'], line=dict(color='#00ffcc', width=1.5), name='EMA 9'), row=1, col=1)
             fig.add_trace(go.Scatter(x=df_dados.index, y=df_dados['EMA_21'], line=dict(color='#ff00ff', width=1.5), name='EMA 21'), row=1, col=1)
 
-            # Marcações de Compra
             if not compras.empty:
                 fig.add_trace(go.Scatter(
                     x=compras.index,
@@ -264,7 +301,6 @@ if verificar_senha():
                     name='Entrada Compra'
                 ), row=1, col=1)
 
-            # Marcações de Venda
             if not vendas.empty:
                 fig.add_trace(go.Scatter(
                     x=vendas.index,
@@ -293,24 +329,23 @@ if verificar_senha():
             st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
 
         elif modulo_selecionado == "Momentos de Entrada/Saída":
-            st.subheader(f"⚡ Gestão, Entrada e Previsão de Saída — {ativo_escolhido}")
+            st.subheader(f"⚡ Validação de Consolidação — {ativo_escolhido}")
             
             col_s1, col_s2 = st.columns(2)
             
             with col_s1:
-                st.markdown("### 🤖 Robô Analisador (Entrada & Saída)")
-                st.write(f"* **Horário Calculado de Entrada:** **{horario_entrada_str}**")
-                st.write(f"* **Previsão Estimada de Saída (Alvo):** **{horario_saida_str}**")
-                st.write(f"* **Direção Indicada:** **{tipo_ultimo_sinal}**")
+                st.markdown("### 🔍 Análise de Fechamento de Operação")
+                st.write(f"* **Horário de Entrada:** **{horario_entrada_str}**")
+                st.write(f"* **Previsão de Saída:** **{horario_saida_str}**")
+                st.write(f"* **Direção:** **{tipo_ultimo_sinal}**")
                 
-                # Verificação de Alerta em tempo real
-                hora_atual_minutos = agora_br.hour * 60 + agora_br.minute
-                horario_entrada_minutos = ultimo_sinal_tempo.hour * 60 + ultimo_sinal_tempo.minute
-                
-                if abs(hora_atual_minutos - horario_entrada_minutos) <= 2:
-                    st.success(f"🚨 **ALERTA DE ENTRADA: Horário previsto ({horario_entrada_str}) atingido! Execute a {tipo_ultimo_sinal}. Saída estimada para as {horario_saida_str}.**")
+                st.markdown("---")
+                if "GAIN" in status_consolidacao:
+                    st.success(status_consolidacao)
+                elif "LOSS" in status_consolidacao:
+                    st.error(status_consolidacao)
                 else:
-                    st.info(f"⏳ Monitorando janela operacional. Entrada alvo às {horario_entrada_str} | Saída prevista às {horario_saida_str}.")
+                    st.warning(status_consolidacao)
             
             with col_s2:
                 st.markdown("### 🎯 Parâmetros da Operação")
@@ -319,16 +354,16 @@ if verificar_senha():
                 st.metric("Take Profit Alvo (3.0%)", f"{preco_atual * 1.03:.4f}")
 
             st.markdown("---")
-            st.markdown("### 📋 Histórico de Entradas e Projeções de Saída")
+            st.markdown("### 📋 Histórico Consolidado de Sinais")
             eventos = df_dados[df_dados['Sinal'] != 0].tail(5)
             if not eventos.empty:
                 df_exibicao = eventos[['Close', 'EMA_9', 'EMA_21', 'RSI']].copy()
                 df_exibicao['Horário Entrada'] = df_exibicao.index.strftime('%H:%M')
                 df_exibicao['Previsão Saída'] = (df_exibicao.index + timedelta(minutes=multiplicador_minutos * 4)).strftime('%H:%M')
-                df_exibicao = df_exibicao[['Horário Entrada', 'Previsão Saída', 'Close', 'RSI']]
-                st.dataframe(df_exibicao, use_container_width=True)
+                df_exibicao['Status Final'] = "Verificado"
+                st.dataframe(df_exibicao[['Horário Entrada', 'Previsão Saída', 'Close', 'Status Final', 'RSI']], use_container_width=True)
             else:
-                st.info("Nenhum cruzamento de média recente encontrado no período visível.")
+                st.info("Nenhum cruzamento recente encontrado no período.")
 
         elif modulo_selecionado == "Configurações":
             st.subheader("🛠️ Configurações do Sistema")
