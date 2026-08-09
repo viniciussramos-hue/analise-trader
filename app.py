@@ -3,7 +3,7 @@ import pandas as pd
 import yfinance as yf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 from streamlit_autorefresh import st_autorefresh
 
@@ -100,12 +100,9 @@ if verificar_senha():
             
         st.markdown("---")
         
-        # --- Configuração de Gatilho Temporal (Horário Fixo) ---
-        st.subheader("⏰ Gatilho de Horário (Robô)")
-        ativar_robo_horario = st.toggle("Ativar Operação por Horário", value=False)
-        
-        hora_entrada_prog = st.time_input("Horário de Entrada", value=datetime.strptime("15:00", "%H:%M").time())
-        tipo_operacao_prog = st.selectbox("Direção", ["COMPRA (Call)", "VENDA (Put)"])
+        # --- Configuração do Robô de Análise Automática por Horário ---
+        st.subheader("🤖 Robô Analisador Temporal")
+        ativar_robo_analise = st.toggle("Ativar Alerta de Entrada Calculada", value=True)
         
         st.markdown("---")
         st.subheader("📡 Status do Feed")
@@ -142,7 +139,7 @@ if verificar_senha():
     st.markdown("---")
 
     # --- Seleção de Timeframe / Intervalo ---
-    st.markdown("##### ⏱️ Timeframe para Análise e Gatilho")
+    st.markdown("##### ⏱️ Timeframe para Análise e Cálculo de Gatilho")
     col_t1, col_t2, col_t3, col_t4, col_t5, col_t6 = st.columns(6)
     
     if "intervalo_escolhido" not in st.session_state:
@@ -192,6 +189,14 @@ if verificar_senha():
         rs = ganho / perda
         df_dados['RSI'] = 100 - (100 / (1 + rs))
 
+        # Detecção de Sinais Técnicos (Cálculo Automático)
+        df_dados['Sinal'] = 0
+        df_dados.loc[(df_dados['EMA_9'] > df_dados['EMA_21']) & (df_dados['EMA_9'].shift(1) <= df_dados['EMA_21'].shift(1)), 'Sinal'] = 1  
+        df_dados.loc[(df_dados['EMA_9'] < df_dados['EMA_21']) & (df_dados['EMA_9'].shift(1) >= df_dados['EMA_21'].shift(1)), 'Sinal'] = -1 
+
+        compras = df_dados[df_dados['Sinal'] == 1]
+        vendas = df_dados[df_dados['Sinal'] == -1]
+
         preco_atual = float(df_dados['Close'].iloc[-1])
         preco_anterior = float(df_dados['Close'].iloc[-2])
         variacao_pct = ((preco_atual - preco_anterior) / preco_anterior) * 100
@@ -199,15 +204,15 @@ if verificar_senha():
         ema9_atual = float(df_dados['EMA_9'].iloc[-1])
         ema21_atual = float(df_dados['EMA_21'].iloc[-1])
 
-        # Verificação do Robô por Horário
-        status_gatilho_temporal = "Aguardando Horário..."
-        if ativar_robo_horario:
-            hora_atual_time = agora_br.time()
-            # Compara se a hora atual está no minuto programado
-            if hora_atual_time.hour == hora_entrada_prog.hour and hora_atual_time.minute == hora_entrada_prog.minute:
-                status_gatilho_temporal = f"🚨 GATILHO ACIONADO! Executando {tipo_operacao_prog} às {hora_entrada_prog.strftime('%H:%M')}"
-            else:
-                status_gatilho_temporal = f"⏳ Em espera (Alvo: {hora_entrada_prog.strftime('%H:%M')})"
+        # --- Cálculo Inteligente do Horário de Entrada Baseado na Análise ---
+        # Pega o último horário em que o indicador deu sinal de entrada
+        sinais_registrados = df_dados[df_dados['Sinal'] != 1].copy() if not df_dados[df_dados['Sinal'] != 0].empty else df_dados
+        ultimo_sinal_tempo = df_dados[df_dados['Sinal'] != 0].index[-1] if not df_dados[df_dados['Sinal'] != 0].empty else df_dados.index[-1]
+        tipo_ultimo_sinal = "COMPRA (Call)" if not df_dados[df_dados['Sinal'] != 0].empty and df_dados[df_dados['Sinal'] != 0]['Sinal'].iloc[-1] == 1 else "VENDA (Put)"
+        
+        horario_previsto_str = ultimo_sinal_tempo.strftime('%H:%M')
+
+        status_analise_temporal = f"Analisado: Último gatilho às {horario_previsto_str}"
 
         # --- Navegação ---
         if modulo_selecionado == "Visão Geral":
@@ -215,15 +220,15 @@ if verificar_senha():
             
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("Preço / Cotação (BRT)", f"{preco_atual:.4f}", f"{variacao_pct:.2f}%")
-            col2.metric("Tendência (EMA 9/21)", "Alta" if ema9_atual > ema21_atual else "Baixa", "Forte")
-            col3.metric("Robô Temporal", "Ativo" if ativar_robo_horario else "Inativo", status_gatilho_temporal)
+            col2.metric("Tendência Calculada", "Alta" if ema9_atual > ema21_atual else "Baixa", "Forte")
+            col3.metric("Melhor Horário Alvo", horario_previsto_str, tipo_ultimo_sinal)
             col4.metric("IFR (14)", f"{float(df_dados['RSI'].iloc[-1]):.1f}", "Normal")
             
-            if ativar_robo_horario:
-                st.info(f"🤖 **Robô por Horário Configurado:** O sistema está monitorando para disparar uma **{tipo_operacao_prog}** exatamente às **{hora_entrada_prog.strftime('%H:%M')}** no ativo `{ativo_escolhido}`.")
+            st.markdown("---")
+            st.info(f"🤖 **Análise Automática Concluída:** O robô analisou os indicadores e calculou que o momento ideal de entrada recente ocorreu às **{horario_previsto_str}** com sinal de **{tipo_ultimo_sinal}**.")
 
         elif modulo_selecionado == "Gráficos & Análise":
-            st.subheader(f"📈 Gráfico com Gatilho Temporal — {ativo_escolhido} [{intervalo}]")
+            st.subheader(f"📈 Gráfico com Horários Calculados de Entrada — {ativo_escolhido} [{intervalo}]")
             
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
                                 vertical_spacing=0.03, row_heights=[0.7, 0.3])
@@ -240,14 +245,29 @@ if verificar_senha():
             fig.add_trace(go.Scatter(x=df_dados.index, y=df_dados['EMA_9'], line=dict(color='#00ffcc', width=1.5), name='EMA 9'), row=1, col=1)
             fig.add_trace(go.Scatter(x=df_dados.index, y=df_dados['EMA_21'], line=dict(color='#ff00ff', width=1.5), name='EMA 21'), row=1, col=1)
 
-            # Linha vertical indicando o horário programado no gráfico, caso exista nos dados
-            if ativar_robo_horario:
-                # Procura a data/hora correspondente no índice de candles de hoje
-                horario_alvo_str = f"{agora_br.strftime('%Y-%m-%d')} {hora_entrada_prog.strftime('%H:%M')}"
-                try:
-                    fig.add_vline(x=horario_alvo_str, line_dash="dash", line_color="yellow", annotation_text=f"Alvo: {hora_entrada_prog.strftime('%H:%M')}", annotation_position="top left")
-                except:
-                    pass
+            # Marcações de Compra
+            if not compras.empty:
+                fig.add_trace(go.Scatter(
+                    x=compras.index,
+                    y=compras['Low'] * 0.995,
+                    mode='markers+text',
+                    text=[t.strftime('%H:%M') for t in compras.index],
+                    textposition="bottom center",
+                    marker=dict(symbol='triangle-up', size=14, color='#00FF00'),
+                    name='Entrada Compra (Alvo)'
+                ), row=1, col=1)
+
+            # Marcações de Venda
+            if not vendas.empty:
+                fig.add_trace(go.Scatter(
+                    x=vendas.index,
+                    y=vendas['High'] * 1.005,
+                    mode='markers+text',
+                    text=[t.strftime('%H:%M') for t in vendas.index],
+                    textposition="top center",
+                    marker=dict(symbol='triangle-down', size=14, color='#FF0000'),
+                    name='Entrada Venda (Alvo)'
+                ), row=1, col=1)
 
             fig.add_trace(go.Scatter(x=df_dados.index, y=df_dados['RSI'], line=dict(color='#ffa500', width=1.5), name='RSI (14)'), row=2, col=1)
             fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
@@ -266,19 +286,24 @@ if verificar_senha():
             st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
 
         elif modulo_selecionado == "Momentos de Entrada/Saída":
-            st.subheader(f"⚡ Gestão de Entradas por Horário — {ativo_escolhido}")
+            st.subheader(f"⚡ Gestão e Alerta de Entradas Calculadas — {ativo_escolhido}")
             
             col_s1, col_s2 = st.columns(2)
             
             with col_s1:
-                st.markdown("### ⏰ Status do Robô Temporal")
-                st.write(f"* **Status Atual:** {status_gatilho_temporal}")
-                st.write(f"* **Horário Alvo Programado:** {hora_entrada_prog.strftime('%H:%M')}")
-                st.write(f"* **Ação Configurada:** {tipo_operacao_prog}")
-                if ativar_robo_horario:
-                    st.success("🟢 Robô ativado na barra lateral.")
+                st.markdown("### 🤖 Robô Analisador de Horário")
+                st.write(f"* **Status da Análise:** Ativo e Monitorando")
+                st.write(f"* **Último Horário Calculado de Entrada:** **{horario_previsto_str}**")
+                st.write(f"* **Direção Indicada pelo Setup:** **{tipo_ultimo_sinal}**")
+                
+                # Verifica se o horário atual está próximo do horário calculado (janela de 2 minutos)
+                hora_atual_minutos = agora_br.hour * 60 + agora_br.minute
+                horario_alvo_minutos = ultimo_sinal_tempo.hour * 60 + ultimo_sinal_tempo.minute
+                
+                if abs(hora_atual_minutos - horario_alvo_minutos) <= 2:
+                    st.success(f"🚨 **ALERTA: O HORÁRIO PREVISTO ({horario_previsto_str}) É AGORA! HORA DE EXECUTAR A {tipo_ultimo_sinal}!**")
                 else:
-                    st.warning("⚠️ Ative o botão 'Ativar Operação por Horário' na barra lateral para habilitar o gatilho.")
+                    st.info(f"⏳ Aguardando próxima janela de horário calculada pelo setup técnico.")
             
             with col_s2:
                 st.markdown("### 🎯 Parâmetros da Operação")
@@ -287,8 +312,15 @@ if verificar_senha():
                 st.metric("Take Profit Alvo (3.0%)", f"{preco_atual * 1.03:.4f}")
 
             st.markdown("---")
-            st.markdown("### 📋 Histórico Recente do Ativo")
-            st.dataframe(df_dados[['Open', 'High', 'Low', 'Close', 'Volume', 'RSI']].tail(10), use_container_width=True)
+            st.markdown("### 📋 Histórico de Horários Calculados de Entrada")
+            eventos = df_dados[df_dados['Sinal'] != 0].tail(5)
+            if not eventos.empty:
+                # Exibe tabela formatada com os horários dos sinais
+                df_exibicao = eventos[['Close', 'EMA_9', 'EMA_21', 'RSI']].copy()
+                df_exibicao.index = df_exibicao.index.strftime('%H:%M:%S - %d/%m/%Y')
+                st.dataframe(df_exibicao, use_container_width=True)
+            else:
+                st.info("Nenhum cruzamento de média recente encontrado no período visível. Tente alterar o timeframe ou o ativo.")
 
         elif modulo_selecionado == "Configurações":
             st.subheader("🛠️ Configurações do Sistema")
