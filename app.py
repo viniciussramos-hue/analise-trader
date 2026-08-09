@@ -76,56 +76,33 @@ if verificar_senha():
         st.title("⚙️ Painel de Controle")
         st.markdown("---")
         
-        # --- Seleção por Botões / Categorias (Sem digitar) ---
         st.subheader("🎯 Seleção de Ativos")
-        
         categoria = st.selectbox(
             "Categoria",
             ["Ações B3", "Criptomoedas", "Forex (Moedas)", "Índices & Globais"]
         )
         
-        # Dicionários de ativos pré-configurados para escolha rápida via selectbox/botão
         if categoria == "Ações B3":
-            ativo_escolhido = st.selectbox("Escolha o Ativo", [
-                "PETR4.SA", "VALE3.SA", "ITUB4.SA", "BBDC4.SA", "BBAS3.SA", "ABEV3.SA"
-            ])
+            ativo_escolhido = st.selectbox("Ativo", ["PETR4.SA", "VALE3.SA", "ITUB4.SA", "BBDC4.SA", "BBAS3.SA", "ABEV3.SA"])
         elif categoria == "Criptomoedas":
-            ativo_escolhido = st.selectbox("Escolha a Cripto", [
-                "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "ADA-USD"
-            ])
+            ativo_escolhido = st.selectbox("Ativo", ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "ADA-USD"])
         elif categoria == "Forex (Moedas)":
-            ativo_escolhido = st.selectbox("Escolha o Par", [
-                "GBPUSD=X", "EURUSD=X", "USDJPY=X", "USDBRL=X", "AUDUSD=X", "GBPBRL=X"
-            ])
+            ativo_escolhido = st.selectbox("Ativo", ["GBPUSD=X", "EURUSD=X", "USDJPY=X", "USDBRL=X", "AUDUSD=X", "GBPBRL=X"])
         else:
-            ativo_escolhido = st.selectbox("Escolha o Índice", [
-                "^BVSP", "^GSPC", "^IXIC", "GC=F", "CL=F"  # Ibovespa, S&P 500, Nasdaq, Ouro, Petróleo WTI
-            ])
-            
-        col_p1, col_p2 = st.columns(2)
-        with col_p1:
-            periodo = st.selectbox("Período", ["1d", "5d", "1mo", "6mo", "1y"], index=2)
-        with col_p2:
-            intervalo = st.selectbox("Intervalo", ["1m", "5m", "15m", "1h", "1d"], index=3)
+            ativo_escolhido = st.selectbox("Ativo", ["^BVSP", "^GSPC", "^IXIC", "GC=F", "CL=F"])
             
         st.markdown("---")
-        
-        # --- Configuração do Modo Ao Vivo (Live) ---
         st.subheader("📡 Status do Feed")
         modo_ao_vivo = st.toggle("Ativar Atualização Ao Vivo", value=False)
         
-        intervalo_segundos = 10
         if modo_ao_vivo:
             freq = st.slider("Intervalo (segundos)", min_value=5, max_value=60, value=10, step=5)
-            intervalo_segundos = freq * 1000
-            st_autorefresh(interval=intervalo_segundos, key="live_trader_refresh")
+            st_autorefresh(interval=freq * 1000, key="live_trader_refresh")
             st.success(f"🟢 Ao vivo ativo ({freq}s)")
         else:
             st.info("⏸️ Modo manual")
 
         st.markdown("---")
-        
-        # Menu de navegação
         modulo_selecionado = st.radio(
             "Navegação",
             ["Visão Geral", "Gráficos & Análise", "Momentos de Entrada/Saída", "Configurações"]
@@ -136,9 +113,6 @@ if verificar_senha():
             st.session_state.autenticado = False
             st.rerun()
 
-    # --- Carregamento dos Dados ---
-    df_dados = carregar_dados(ativo_escolhido, periodo, intervalo)
-
     # --- Conteúdo da Página Principal ---
     col_titulo, col_status = st.columns([3, 1])
     with col_titulo:
@@ -148,9 +122,50 @@ if verificar_senha():
         st.markdown(f"<div style='text-align: right; color: #808495; padding-top: 20px;'>Última sinc: <b>{hora_atual}</b></div>", unsafe_allow_html=True)
 
     st.markdown("---")
+
+    # --- Gerenciamento de Período / Zoom por Botões na Tela ---
+    st.markdown("##### 🔍 Zoom / Período de Análise Rápida")
+    col_z1, col_z2, col_z3, col_z4, col_z5 = st.columns(5)
     
+    # Controla o estado do período selecionado
+    if "periodo_atual" not in st.session_state:
+        st.session_state.periodo_atual = "1mo"
+
+    if col_z1:
+        if col_z1.button("1 Dia (1m)", use_container_width=True):
+            st.session_state.periodo_atual = "1d"
+            st.session_state.intervalo_atual = "1m"
+            st.rerun()
+    if col_z2:
+        if col_z2.button("5 Dias (5m)", use_container_width=True):
+            st.session_state.periodo_atual = "5d"
+            st.session_state.intervalo_atual = "5m"
+            st.rerun()
+    if col_z3:
+        if col_z3.button("1 Mês (1h)", use_container_width=True):
+            st.session_state.periodo_atual = "1mo"
+            st.session_state.intervalo_atual = "1h"
+            st.rerun()
+    if col_z4:
+        if col_z4.button("6 Meses (1d)", use_container_width=True):
+            st.session_state.periodo_atual = "6mo"
+            st.session_state.intervalo_atual = "1d"
+            st.rerun()
+    if col_z5:
+        if col_z5.button("1 Ano (1d)", use_container_width=True):
+            st.session_state.periodo_atual = "1y"
+            st.session_state.intervalo_atual = "1d"
+            st.rerun()
+
+    # Define valores padrão caso não existam no session_state
+    periodo = st.session_state.get("periodo_atual", "1mo")
+    intervalo = st.session_state.get("intervalo_atual", "1h")
+
+    # Carrega dados com base no período selecionado pelos botões
+    df_dados = carregar_dados(ativo_escolhido, periodo, intervalo)
+
     if df_dados is None or df_dados.empty:
-        st.error(f"❌ Não foi possível carregar os dados para o ativo **{ativo_escolhido}**. Tente selecionar outro intervalo ou categoria.")
+        st.error(f"❌ Não foi possível carregar os dados para o ativo **{ativo_escolhido}** com o período selecionado.")
     else:
         # Cálculos Técnicos
         df_dados['EMA_9'] = df_dados['Close'].ewm(span=9, adjust=False).mean()
@@ -181,10 +196,10 @@ if verificar_senha():
             col4.metric("IFR (14)", f"{float(df_dados['RSI'].iloc[-1]):.1f}", "Normal")
             
             st.markdown("---")
-            st.info(f"💡 **Ativo selecionado:** `{ativo_escolhido}` carregado com sucesso. Alterne entre as categorias na barra lateral para explorar Criptomoedas, Forex (`GBP/USD`, `EUR/USD`), Índices globais e Ações.")
+            st.info(f"💡 Ativo monitorado: `{ativo_escolhido}`. Utilize os botões de zoom acima para alterar rapidamente o horizonte temporal do gráfico.")
 
         elif modulo_selecionado == "Gráficos & Análise":
-            st.subheader(f"📈 Gráfico de Candlestick & Indicadores — {ativo_escolhido}")
+            st.subheader(f"📈 Gráfico de Candlestick & Indicadores — {ativo_escolhido} (Zoom: {periodo})")
             
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
                                 vertical_spacing=0.03, row_heights=[0.7, 0.3])
@@ -210,7 +225,7 @@ if verificar_senha():
                 paper_bgcolor='#0e1117',
                 plot_bgcolor='#0e1117',
                 xaxis_rangeslider_visible=False,
-                height=600,
+                height=550,
                 margin=dict(l=10, r=10, t=10, b=10),
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
             )
