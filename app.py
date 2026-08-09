@@ -6,6 +6,7 @@ from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 import pytz
 from streamlit_autorefresh import st_autorefresh
+import requests
 
 # --- Configuração da Página ---
 st.set_page_config(
@@ -90,6 +91,10 @@ def carregar_dados(ticker, periodo, intervalo):
     except Exception as e:
         return None
 
+# --- Inicialização da Carteira Simulada no Session State ---
+if "historico_ordens" not in st.session_state:
+    st.session_state.historico_ordens = []
+
 # --- Execução Principal do App ---
 if verificar_senha():
     # --- Barra Lateral (Sidebar) ---
@@ -115,10 +120,12 @@ if verificar_senha():
         st.markdown("---")
         
         # --- Gerenciamento de Risco ---
-        st.subheader("🛡️ Gestão de Risco")
+        st.subheader("🛡️ Gestão de Risco & Alertas")
         capital_risco = st.number_input("Capital a Arriscar (R$ / US$)", value=100.0, step=50.0)
         alvo_fib_gain = st.slider("Alvo Gain (%)", min_value=1.0, max_value=10.0, value=3.0, step=0.5)
         stop_loss_pct = st.slider("Stop Loss (%)", min_value=0.5, max_value=5.0, value=1.5, step=0.5)
+        
+        webhook_url = st.text_input("Webhook URL (Discord/Telegram)", type="password", placeholder="https://discord.com/api/webhooks/...")
 
         st.markdown("---")
         st.subheader("📡 Status do Feed")
@@ -155,7 +162,7 @@ if verificar_senha():
     st.markdown("---")
 
     # --- Seleção de Timeframe / Intervalo ---
-    st.markdown("##### ⏱️ Timeframe para Análise Institucional")
+    st.markdown("##### ⏱️ Timeframe para Análise Institucional Avançada")
     col_t1, col_t2, col_t3, col_t4, col_t5, col_t6 = st.columns(6)
     
     if "intervalo_escolhido" not in st.session_state:
@@ -222,6 +229,16 @@ if verificar_senha():
         ema9_atual = float(df_dados['EMA_9'].iloc[-1])
         ema21_atual = float(df_dados['EMA_21'].iloc[-1])
 
+        # Backtest simples de assertividade (Win Rate no histórico recente)
+        total_sinais = len(df_dados[df_dados['Sinal'] != 0])
+        if total_sinais > 0:
+            # Simula acerto verificando se o preço subiu após sinal de compra ou caiu após venda
+            df_dados['Retorno_Futuro'] = df_dados['Close'].shift(-3) - df_dados['Close']
+            df_dados['Acerto'] = ((df_dados['Sinal'] == 1) & (df_dados['Retorno_Futuro'] > 0)) | ((df_dados['Sinal'] == -1) & (df_dados['Retorno_Futuro'] < 0))
+            win_rate = (df_dados['Acerto'].sum() / total_sinais) * 100
+        else:
+            win_rate = 50.0
+
         # Horários Calculados
         ultimo_sinal_tempo = df_dados[df_dados['Sinal'] != 0].index[-1] if not df_dados[df_dados['Sinal'] != 0].empty else df_dados.index[-1]
         tipo_ultimo_sinal = "COMPRA (Call)" if not df_dados[df_dados['Sinal'] != 0].empty and df_dados[df_dados['Sinal'] != 0]['Sinal'].iloc[-1] == 1 else "VENDA (Put)"
@@ -243,12 +260,12 @@ if verificar_senha():
             
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("Preço / Cotação (BRT)", f"{preco_atual:.4f}", f"{variacao_pct:.2f}%")
-            col2.metric("Tendência Calculada", "Alta" if ema9_atual > ema21_atual else "Baixa", "Forte")
+            col2.metric("Assertividade (Win Rate)", f"{win_rate:.1f}%", "Baseado no Histórico")
             col3.metric("Entrada / Saída Alvo", f"{horario_entrada_str} ➔ {horario_saida_str}", tipo_ultimo_sinal)
-            col4.metric("Filtro de Volume", "Com Volume Instucional" if df_dados['Vol_Spike'].iloc[-1] else "Volume Normal", "Filtro Ativo")
+            col4.metric("Filtro de Volume", "Com Volume Institucional" if df_dados['Vol_Spike'].iloc[-1] else "Volume Normal", "Filtro Ativo")
             
             st.markdown("---")
-            st.info(f"💡 **Análise Confluente Ativa:** O sistema cruzou indicadores de tendência (EMA 9/21), IFR e picos de volume (`Volume Spike`) para validar o melhor momento operacional.")
+            st.info(f"💡 **Ecossistema Institucional Ativo:** O app monitora picos de volume, calcula taxa de acerto estatística do setup e simula ordens em tempo real.")
 
         elif modulo_selecionado == "Gráficos & Análise":
             st.subheader(f"📈 Gráfico Institucional Avançado — {ativo_escolhido} [{intervalo}]")
@@ -307,17 +324,29 @@ if verificar_senha():
             st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
 
         elif modulo_selecionado == "Momentos de Entrada/Saída":
-            st.subheader(f"⚡ Gestão Inteligente de Entrada, Saída e Risco — {ativo_escolhido}")
+            st.subheader(f"⚡ Gestão Inteligente, Simulador e Risco — {ativo_escolhido}")
             
             col_s1, col_s2 = st.columns(2)
             
             with col_s1:
-                st.markdown("### 🤖 Robô Analisador com Alerta Visual")
+                st.markdown("### 🤖 Robô Analisador & Simulador de Ordens (Paper Trading)")
                 st.write(f"* **Horário Calculado de Entrada:** **{horario_entrada_str}**")
                 st.write(f"* **Previsão Estimada de Saída:** **{horario_saida_str}**")
                 st.write(f"* **Direção Indicada:** **{tipo_ultimo_sinal}**")
-                st.write(f"* **Confirmação por Volume:** {'✅ Spike de Volume Detectado (Forte)' if df_dados['Vol_Spike'].iloc[-1] else '⚠️ Volume Dentro da Média'}")
+                st.write(f"* **Taxa de Acerto Histórica (Win Rate):** **{win_rate:.1f}%**")
                 
+                # Botão para executar ordem simulada
+                if st.button("🚀 Executar Ordem Simulada (Paper Trading)", use_container_width=True):
+                    nova_ordem = {
+                        "Ativo": ativo_escolhido,
+                        "Tipo": tipo_ultimo_sinal,
+                        "Entrada": preco_atual,
+                        "Horário": agora_br.strftime("%H:%M:%S"),
+                        "Status": "Aberta (Simulada)"
+                    }
+                    st.session_state.historico_ordens.append(nova_ordem)
+                    st.success("✅ Ordem simulada registrada com sucesso na carteira paper trading!")
+
                 hora_atual_minutos = agora_br.hour * 60 + agora_br.minute
                 horario_entrada_minutos = ultimo_sinal_tempo.hour * 60 + ultimo_sinal_tempo.minute
                 
@@ -337,19 +366,16 @@ if verificar_senha():
                 st.info(f"💼 Risco configurado: R$ {capital_risco:.2f} por operação.")
 
             st.markdown("---")
-            st.markdown("### 📋 Histórico Consolidado de Sinais Institucionais")
-            eventos = df_dados[df_dados['Sinal'] != 0].tail(5)
-            if not eventos.empty:
-                df_exibicao = eventos[['Close', 'EMA_9', 'EMA_21', 'RSI']].copy()
-                df_exibicao['Horário Entrada'] = df_exibicao.index.strftime('%H:%M')
-                df_exibicao['Previsão Saída'] = (df_exibicao.index + timedelta(minutes=multiplicador_minutos * 4)).strftime('%H:%M')
-                df_exibicao['Status Volume'] = "Validado"
-                st.dataframe(df_exibicao[['Horário Entrada', 'Previsão Saída', 'Close', 'Status Volume', 'RSI']], use_container_width=True)
+            st.markdown("### 📂 Carteira de Paper Trading (Ordens Simuladas)")
+            if len(st.session_state.historico_ordens) > 0:
+                df_ordens = pd.DataFrame(st.session_state.historico_ordens)
+                st.dataframe(df_ordens, use_container_width=True)
             else:
-                st.info("Nenhum cruzamento recente encontrado no período.")
+                st.info("Nenhuma ordem simulada aberta no momento. Clique no botão acima para testar uma entrada.")
 
         elif modulo_selecionado == "Configurações":
-            st.subheader("🛠️ Configurações do Sistema")
-            st.write("Gerencie parâmetros de conexão e APIs.")
+            st.subheader("🛠️ Configurações do Sistema & Conexões")
+            st.write("Gerencie parâmetros avançados de conexão e chaves de API.")
             st.text_input("Chave API (Opcional para dados avançados)", type="password", value="************************")
+            st.text_input("Webhook Telegram/Discord para Alertas", value=webhook_url, placeholder="Insira o link do webhook aqui")
             st.success("Configurações salvas localmente com sucesso.")
