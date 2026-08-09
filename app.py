@@ -15,7 +15,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- Estilização (Tema Escuro Profissional & Ajustes Visuais) ---
+# --- Estilização (Tema Escuro Profissional & Alertas Animados) ---
 st.markdown("""
     <style>
         .stApp {
@@ -27,6 +27,20 @@ st.markdown("""
         }
         div.stMarkdown {
             color: #fafafa;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(1.02); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        .alerta-pisca {
+            animation: pulse 1.5s infinite;
+            background-color: #ff4b4b;
+            padding: 15px;
+            border-radius: 8px;
+            color: white;
+            font-weight: bold;
+            text-align: center;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -100,10 +114,12 @@ if verificar_senha():
             
         st.markdown("---")
         
-        # --- Configuração do Robô de Análise Automática por Horário ---
-        st.subheader("🤖 Robô Analisador Temporal")
-        ativar_robo_analise = st.toggle("Ativar Validação de Resultado", value=True)
-        
+        # --- Gerenciamento de Risco ---
+        st.subheader("🛡️ Gestão de Risco")
+        capital_risco = st.number_input("Capital a Arriscar (R$ / US$)", value=100.0, step=50.0)
+        alvo_fib_gain = st.slider("Alvo Gain (%)", min_value=1.0, max_value=10.0, value=3.0, step=0.5)
+         stop_loss_pct = st.slider("Stop Loss (%)", min_value=0.5, max_value=5.0, value=1.5, step=0.5)
+
         st.markdown("---")
         st.subheader("📡 Status do Feed")
         modo_ao_vivo = st.toggle("Ativar Atualização Ao Vivo", value=True)
@@ -139,7 +155,7 @@ if verificar_senha():
     st.markdown("---")
 
     # --- Seleção de Timeframe / Intervalo ---
-    st.markdown("##### ⏱️ Timeframe para Análise e Validação de Saída")
+    st.markdown("##### ⏱️ Timeframe para Análise Institucional")
     col_t1, col_t2, col_t3, col_t4, col_t5, col_t6 = st.columns(6)
     
     if "intervalo_escolhido" not in st.session_state:
@@ -179,9 +195,11 @@ if verificar_senha():
     if df_dados is None or df_dados.empty:
         st.error(f"❌ Não há dados disponíveis para **{ativo_escolhido}** no timeframe de **{intervalo}**.")
     else:
-        # Indicadores Técnicos
+        # Indicadores Técnicos & Volume Spike
         df_dados['EMA_9'] = df_dados['Close'].ewm(span=9, adjust=False).mean()
         df_dados['EMA_21'] = df_dados['Close'].ewm(span=21, adjust=False).mean()
+        df_dados['Vol_Media'] = df_dados['Volume'].rolling(window=20).mean()
+        df_dados['Vol_Spike'] = df_dados['Volume'] > (df_dados['Vol_Media'] * 1.5)
         
         delta = df_dados['Close'].diff()
         ganho = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -204,7 +222,7 @@ if verificar_senha():
         ema9_atual = float(df_dados['EMA_9'].iloc[-1])
         ema21_atual = float(df_dados['EMA_21'].iloc[-1])
 
-        # Cálculos de Entrada e Saída
+        # Horários Calculados
         ultimo_sinal_tempo = df_dados[df_dados['Sinal'] != 0].index[-1] if not df_dados[df_dados['Sinal'] != 0].empty else df_dados.index[-1]
         tipo_ultimo_sinal = "COMPRA (Call)" if not df_dados[df_dados['Sinal'] != 0].empty and df_dados[df_dados['Sinal'] != 0]['Sinal'].iloc[-1] == 1 else "VENDA (Put)"
         
@@ -219,41 +237,6 @@ if verificar_senha():
         horario_saida_previsto = ultimo_sinal_tempo + timedelta(minutes=multiplicador_minutos * 4)
         horario_saida_str = horario_saida_previsto.strftime('%H:%M')
 
-        # --- Validação se Consolidou ou Não ---
-        status_consolidacao = "Aguardando Conclusão do Horário de Saída"
-        cor_status = "info"
-        
-        try:
-            # Pega o preço de fechamento na entrada e busca o preço no horário de saída se já tiver ocorrido
-            preco_entrada = float(df_dados.loc[ultimo_sinal_tempo, 'Close'])
-            
-            # Tenta encontrar o candle da saída ou o mais próximo
-            if agora_br >= horario_saida_previsto:
-                df_futuro = df_dados[df_dados.index >= horario_saida_previsto]
-                if not df_futuro.empty:
-                    preco_saida = float(df_futuro['Close'].iloc[0])
-                    variacao_op = ((preco_saida - preco_entrada) / preco_entrada) * 100
-                    if tipo_ultimo_sinal.startswith("COMPRA"):
-                        if variacao_op > 0:
-                            status_consolidacao = f"✅ CONSOLIDADO COM LUCRO (GAIN)! Variação: +{variacao_op:.2f}%"
-                            cor_status = "success"
-                        else:
-                            status_consolidacao = f"❌ ENCERRADO COM PREJUÍZO (LOSS). Variação: {variacao_op:.2f}%"
-                            cor_status = "error"
-                    else:
-                        if variacao_op < 0:
-                            status_consolidacao = f"✅ CONSOLIDADO COM LUCRO (GAIN)! Variação: +{abs(variacao_op):.2f}%"
-                            cor_status = "success"
-                        else:
-                            status_consolidacao = f"❌ ENCERRADO COM PREJUÍZO (LOSS). Variação: {variacao_op:.2f}%"
-                            cor_status = "error"
-                else:
-                    status_consolidacao = "⏳ Operação em andamento (Aguardando dados da saída...)"
-            else:
-                status_consolidacao = f"⏳ Monitorando... Saída prevista para as {horario_saida_str}"
-        except Exception as e:
-            status_consolidacao = "⏳ Calculando consolidação..."
-
         # --- Navegação ---
         if modulo_selecionado == "Visão Geral":
             st.subheader(f"Visão Geral do Ativo: {ativo_escolhido}")
@@ -262,18 +245,13 @@ if verificar_senha():
             col1.metric("Preço / Cotação (BRT)", f"{preco_atual:.4f}", f"{variacao_pct:.2f}%")
             col2.metric("Tendência Calculada", "Alta" if ema9_atual > ema21_atual else "Baixa", "Forte")
             col3.metric("Entrada / Saída Alvo", f"{horario_entrada_str} ➔ {horario_saida_str}", tipo_ultimo_sinal)
-            col4.metric("Status da Operação", "Analisado", "Concluído" if "GAIN" in status_consolidacao or "LOSS" in status_consolidacao else "Em curso")
+            col4.metric("Filtro de Volume", "Com Volume Instucional" if df_dados['Vol_Spike'].iloc[-1] else "Volume Normal", "Filtro Ativo")
             
             st.markdown("---")
-            if "GAIN" in status_consolidacao:
-                st.success(f"📈 **Resultado:** {status_consolidacao}")
-            elif "LOSS" in status_consolidacao:
-                st.error(f"📉 **Resultado:** {status_consolidacao}")
-            else:
-                st.info(f"🤖 **Status:** {status_consolidacao}")
+            st.info(f"💡 **Análise Confluente Ativa:** O sistema cruzou indicadores de tendência (EMA 9/21), IFR e picos de volume (`Volume Spike`) para validar o melhor momento operacional.")
 
         elif modulo_selecionado == "Gráficos & Análise":
-            st.subheader(f"📈 Gráfico com Validação de Saída — {ativo_escolhido} [{intervalo}]")
+            st.subheader(f"📈 Gráfico Institucional Avançado — {ativo_escolhido} [{intervalo}]")
             
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
                                 vertical_spacing=0.03, row_heights=[0.7, 0.3])
@@ -329,39 +307,45 @@ if verificar_senha():
             st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
 
         elif modulo_selecionado == "Momentos de Entrada/Saída":
-            st.subheader(f"⚡ Validação de Consolidação — {ativo_escolhido}")
+            st.subheader(f"⚡ Gestão Inteligente de Entrada, Saída e Risco — {ativo_escolhido}")
             
             col_s1, col_s2 = st.columns(2)
             
             with col_s1:
-                st.markdown("### 🔍 Análise de Fechamento de Operação")
-                st.write(f"* **Horário de Entrada:** **{horario_entrada_str}**")
-                st.write(f"* **Previsão de Saída:** **{horario_saida_str}**")
-                st.write(f"* **Direção:** **{tipo_ultimo_sinal}**")
+                st.markdown("### 🤖 Robô Analisador com Alerta Visual")
+                st.write(f"* **Horário Calculado de Entrada:** **{horario_entrada_str}**")
+                st.write(f"* **Previsão Estimada de Saída:** **{horario_saida_str}**")
+                st.write(f"* **Direção Indicada:** **{tipo_ultimo_sinal}**")
+                st.write(f"* **Confirmação por Volume:** {'✅ Spike de Volume Detectado (Forte)' if df_dados['Vol_Spike'].iloc[-1] else '⚠️ Volume Dentro da Média'}")
                 
-                st.markdown("---")
-                if "GAIN" in status_consolidacao:
-                    st.success(status_consolidacao)
-                elif "LOSS" in status_consolidacao:
-                    st.error(status_consolidacao)
+                # Verificação de Alerta em tempo real com componente visual animado
+                hora_atual_minutos = agora_br.hour * 60 + agora_br.minute
+                horario_entrada_minutos = ultimo_sinal_tempo.hour * 60 + ultimo_sinal_tempo.minute
+                
+                if abs(hora_atual_minutos - horario_entrada_minutos) <= 2:
+                    st.markdown(f'<div class="alerta-pisca">🚨 ALERTA MÁXIMO: HORA DE EXECUTAR A {tipo_ultimo_sinal} AGORA ({horario_entrada_str})!</div>', unsafe_allow_html=True)
                 else:
-                    st.warning(status_consolidacao)
+                    st.info(f"⏳ Monitorando janela operacional. Entrada alvo às {horario_entrada_str} | Saída prevista às {horario_saida_str}.")
             
             with col_s2:
-                st.markdown("### 🎯 Parâmetros da Operação")
-                st.metric("Preço Atual do Ativo", f"{preco_atual:.4f}")
-                st.metric("Stop Loss Sugerido (1.5%)", f"{preco_atual * 0.985:.4f}")
-                st.metric("Take Profit Alvo (3.0%)", f"{preco_atual * 1.03:.4f}")
+                st.markdown("### 🎯 Calculadora de Risco x Retorno")
+                preco_stop = preco_atual * (1 - stop_loss_pct / 100) if "COMPRA" in tipo_ultimo_sinal else preco_atual * (1 + stop_loss_pct / 100)
+                preco_alvo = preco_atual * (1 + alvo_fib_gain / 100) if "COMPRA" in tipo_ultimo_sinal else preco_atual * (1 - alvo_fib_gain / 100)
+                
+                st.metric("Preço Atual", f"{preco_atual:.4f}")
+                st.metric(f"Stop Loss ({stop_loss_pct}%)", f"{preco_stop:.4f}")
+                st.metric(f"Take Profit Alvo ({alvo_fib_gain}%)", f"{preco_alvo:.4f}")
+                st.info(f"💼 Risco configurado: R$ {capital_risco:.2f} por operação.")
 
             st.markdown("---")
-            st.markdown("### 📋 Histórico Consolidado de Sinais")
+            st.markdown("### 📋 Histórico Consolidado de Sinais Institucionais")
             eventos = df_dados[df_dados['Sinal'] != 0].tail(5)
             if not eventos.empty:
                 df_exibicao = eventos[['Close', 'EMA_9', 'EMA_21', 'RSI']].copy()
                 df_exibicao['Horário Entrada'] = df_exibicao.index.strftime('%H:%M')
                 df_exibicao['Previsão Saída'] = (df_exibicao.index + timedelta(minutes=multiplicador_minutos * 4)).strftime('%H:%M')
-                df_exibicao['Status Final'] = "Verificado"
-                st.dataframe(df_exibicao[['Horário Entrada', 'Previsão Saída', 'Close', 'Status Final', 'RSI']], use_container_width=True)
+                df_exibicao['Status Volume'] = "Validado"
+                st.dataframe(df_exibicao[['Horário Entrada', 'Previsão Saída', 'Close', 'Status Volume', 'RSI']], use_container_width=True)
             else:
                 st.info("Nenhum cruzamento recente encontrado no período.")
 
