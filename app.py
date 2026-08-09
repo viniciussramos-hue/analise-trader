@@ -4,6 +4,7 @@ import yfinance as yf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
+import pytz
 from streamlit_autorefresh import st_autorefresh
 
 # --- Configuração da Página ---
@@ -55,7 +56,7 @@ def verificar_senha():
                 
     return False
 
-# --- Função para Carregar Dados de Mercado ---
+# --- Função para Carregar e Converter Dados de Mercado ---
 @st.cache_data(ttl=60)
 def carregar_dados(ticker, periodo, intervalo):
     try:
@@ -65,6 +66,13 @@ def carregar_dados(ticker, periodo, intervalo):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         df.dropna(inplace=True)
+        
+        # Converte o índice de tempo para o fuso horário do Brasil (America/Sao_Paulo)
+        if df.index.tz is not None:
+            df.index = df.index.tz_convert('America/Sao_Paulo')
+        else:
+            df.index = df.index.tz_localize('UTC').tz_convert('America/Sao_Paulo')
+            
         return df
     except Exception as e:
         return None
@@ -118,50 +126,55 @@ if verificar_senha():
     with col_titulo:
         st.title("📊 Analise Trader")
     with col_status:
-        hora_atual = datetime.now().strftime("%H:%M:%S")
+        fuso_br = pytz.timezone('America/Sao_Paulo')
+        hora_atual = datetime.now(fuso_br).strftime("%H:%M:%S (Horário de Brasília)")
         st.markdown(f"<div style='text-align: right; color: #808495; padding-top: 20px;'>Última sinc: <b>{hora_atual}</b></div>", unsafe_allow_html=True)
 
     st.markdown("---")
 
-    # --- Gerenciamento de Período / Zoom (Atalhos 1m, 5m, 15m) ---
-    st.markdown("##### 🔍 Zoom / Timeframe Rápido")
-    col_z1, col_z2, col_z3, col_z4, col_z5 = st.columns(5)
+    # --- Seleção de Timeframe / Intervalo sem erro ---
+    st.markdown("##### ⏱️ Selecione o Timeframe para Análise e Entrada")
+    col_t1, col_t2, col_t3, col_t4, col_t5, col_t6 = st.columns(6)
     
-    if "periodo_atual" not in st.session_state:
-        st.session_state.periodo_atual = "1d"
-        st.session_state.intervalo_atual = "1m"
+    if "intervalo_escolhido" not in st.session_state:
+        st.session_state.intervalo_escolhido = "5m"
+        st.session_state.periodo_escolhido = "1d"
 
-    if col_z1.button("Intraday 1m", use_container_width=True):
-        st.session_state.periodo_atual = "1d"
-        st.session_state.intervalo_atual = "1m"
+    if col_t1.button("1 Minuto", use_container_width=True):
+        st.session_state.intervalo_escolhido = "1m"
+        st.session_state.periodo_escolhido = "1d"
         st.rerun()
-    if col_z2.button("Intraday 5m", use_container_width=True):
-        st.session_state.periodo_atual = "1d"
-        st.session_state.intervalo_atual = "5m"
+    if col_t2.button("5 Minutos", use_container_width=True):
+        st.session_state.intervalo_escolhido = "5m"
+        st.session_state.periodo_escolhido = "1d"
         st.rerun()
-    if col_z3.button("Intraday 15m", use_container_width=True):
-        st.session_state.periodo_atual = "5d"
-        st.session_state.intervalo_atual = "15m"
+    if col_t3.button("15 Minutos", use_container_width=True):
+        st.session_state.intervalo_escolhido = "15m"
+        st.session_state.periodo_escolhido = "5d"
         st.rerun()
-    if col_z4.button("1 Hora (1h)", use_container_width=True):
-        st.session_state.periodo_atual = "1mo"
-        st.session_state.intervalo_atual = "1h"
+    if col_t4.button("30 Minutos", use_container_width=True):
+        st.session_state.intervalo_escolhido = "30m"
+        st.session_state.periodo_escolhido = "5d"
         st.rerun()
-    if col_z5.button("Diário (1d)", use_container_width=True):
-        st.session_state.periodo_atual = "6mo"
-        st.session_state.intervalo_atual = "1d"
+    if col_t5.button("1 Hora", use_container_width=True):
+        st.session_state.intervalo_escolhido = "1h"
+        st.session_state.periodo_escolhido = "1mo"
+        st.rerun()
+    if col_t6.button("Diário", use_container_width=True):
+        st.session_state.intervalo_escolhido = "1d"
+        st.session_state.periodo_escolhido = "6mo"
         st.rerun()
 
-    periodo = st.session_state.get("periodo_atual", "1d")
-    intervalo = st.session_state.get("intervalo_atual", "1m")
+    intervalo = st.session_state.get("intervalo_escolhido", "5m")
+    periodo = st.session_state.get("periodo_escolhido", "1d")
 
-    # Carrega dados
+    # Carrega dados convertidos
     df_dados = carregar_dados(ativo_escolhido, periodo, intervalo)
 
     if df_dados is None or df_dados.empty:
-        st.error(f"❌ Não foi possível carregar os dados para o ativo **{ativo_escolhido}** no timeframe de {intervalo} (o Yahoo Finance limita dados de 1m aos últimos dias). Tente selecionar 5m, 15m ou 1h.")
+        st.error(f"❌ Não há dados disponíveis para **{ativo_escolhido}** no timeframe de **{intervalo}**. (Dica: o Yahoo Finance restringe dados de 1m e 5m aos pregões recentes). Tente 15m ou 1h.")
     else:
-        # Cálculos Técnicos
+        # Indicadores Técnicos
         df_dados['EMA_9'] = df_dados['Close'].ewm(span=9, adjust=False).mean()
         df_dados['EMA_21'] = df_dados['Close'].ewm(span=21, adjust=False).mean()
         
@@ -170,6 +183,14 @@ if verificar_senha():
         perda = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
         rs = ganho / perda
         df_dados['RSI'] = 100 - (100 / (1 + rs))
+
+        # Detecção automática de Momentos de Entrada (Cruzamento EMA 9 & 21)
+        df_dados['Sinal'] = 0
+        df_dados.loc[(df_dados['EMA_9'] > df_dados['EMA_21']) & (df_dados['EMA_9'].shift(1) <= df_dados['EMA_21'].shift(1)), 'Sinal'] = 1  # Compra
+        df_dados.loc[(df_dados['EMA_9'] < df_dados['EMA_21']) & (df_dados['EMA_9'].shift(1) >= df_dados['EMA_21'].shift(1)), 'Sinal'] = -1 # Venda
+
+        compras = df_dados[df_dados['Sinal'] == 1]
+        vendas = df_dados[df_dados['Sinal'] == -1]
 
         preco_atual = float(df_dados['Close'].iloc[-1])
         preco_anterior = float(df_dados['Close'].iloc[-2])
@@ -184,20 +205,21 @@ if verificar_senha():
             st.subheader(f"Visão Geral do Ativo: {ativo_escolhido}")
             
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Preço / Cotação", f"{preco_atual:.4f}", f"{variacao_pct:.2f}%")
+            col1.metric("Preço / Cotação (BRT)", f"{preco_atual:.4f}", f"{variacao_pct:.2f}%")
             col2.metric("Tendência (EMA 9/21)", "Alta" if ema9_atual > ema21_atual else "Baixa", "Forte")
             col3.metric("Sinal Técnico", sinal_tendencia, "Setup Ativo")
             col4.metric("IFR (14)", f"{float(df_dados['RSI'].iloc[-1]):.1f}", "Normal")
             
             st.markdown("---")
-            st.info(f"💡 Ativo monitorado: `{ativo_escolhido}`. Use os botões acima para alternar entre **1m**, **5m**, **15m** e outros timeframes.")
+            st.info(f"💡 Horários ajustados para o **Horário de Brasília**. Utilize os botões acima para alternar o tempo gráfico (**1m**, **5m**, **15m**, **30m**).")
 
         elif modulo_selecionado == "Gráficos & Análise":
-            st.subheader(f"📈 Gráfico de Candlestick & Indicadores — {ativo_escolhido} [Timeframe: {intervalo}]")
+            st.subheader(f"📈 Gráfico com Momentos de Entrada — {ativo_escolhido} [{intervalo}]")
             
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
                                 vertical_spacing=0.03, row_heights=[0.7, 0.3])
 
+            # Candlestick
             fig.add_trace(go.Candlestick(
                 x=df_dados.index,
                 open=df_dados['Open'],
@@ -207,14 +229,35 @@ if verificar_senha():
                 name='Candles'
             ), row=1, col=1)
 
+            # Médias Móveis
             fig.add_trace(go.Scatter(x=df_dados.index, y=df_dados['EMA_9'], line=dict(color='#00ffcc', width=1.5), name='EMA 9'), row=1, col=1)
             fig.add_trace(go.Scatter(x=df_dados.index, y=df_dados['EMA_21'], line=dict(color='#ff00ff', width=1.5), name='EMA 21'), row=1, col=1)
 
+            # Marcações de Compra (Seta Verde para cima)
+            if not compras.empty:
+                fig.add_trace(go.Scatter(
+                    x=compras.index,
+                    y=compras['Low'] * 0.995,
+                    mode='markers',
+                    marker=dict(symbol='triangle-up', size=12, color='#00FF00'),
+                    name='Momento Compra'
+                ), row=1, col=1)
+
+            # Marcações de Venda (Seta Vermelha para baixo)
+            if not vendas.empty:
+                fig.add_trace(go.Scatter(
+                    x=vendas.index,
+                    y=vendas['High'] * 1.005,
+                    mode='markers',
+                    marker=dict(symbol='triangle-down', size=12, color='#FF0000'),
+                    name='Momento Venda'
+                ), row=1, col=1)
+
+            # RSI / IFR
             fig.add_trace(go.Scatter(x=df_dados.index, y=df_dados['RSI'], line=dict(color='#ffa500', width=1.5), name='RSI (14)'), row=2, col=1)
             fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
             fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
 
-            # Habilita o zoom com a roda do mouse (scrollZoom=True)
             fig.update_layout(
                 template='plotly_dark',
                 paper_bgcolor='#0e1117',
@@ -235,9 +278,9 @@ if verificar_senha():
             with col_s1:
                 st.markdown("### 📊 Status Operacional Atual")
                 if ema9_atual > ema21_atual:
-                    st.success("🟢 **SINAL DE COMPRA ATIVO**\n\n* **Motivo:** EMA 9 cruzou acima da EMA 21.\n* **Recomendação:** Buscar oportunidades de compra em pullbacks.")
+                    st.success("🟢 **SINAL DE COMPRA ATIVO**\n\n* **Motivo:** EMA 9 acima da EMA 21 no timeframe selecionado.\n* **Ação:** Acompanhe o gatilho verde no gráfico.")
                 else:
-                    st.error("🔴 **SINAL DE VENDA / ATENÇÃO**\n\n* **Motivo:** EMA 9 abaixo da EMA 21.\n* **Recomendação:** Evitar compras longas ou buscar posições vendidas.")
+                    st.error("🔴 **SINAL DE VENDA / ATENÇÃO**\n\n* **Motivo:** EMA 9 abaixo da EMA 21 no timeframe selecionado.\n* **Ação:** Acompanhe o gatilho vermelho no gráfico.")
             
             with col_s2:
                 st.markdown("### 🎯 Parâmetros Calculados")
@@ -246,8 +289,12 @@ if verificar_senha():
                 st.metric("Take Profit Alvo (3.0%)", f"{preco_atual * 1.03:.4f}")
 
             st.markdown("---")
-            st.markdown("### 📋 Histórico Recente de Fechamento")
-            st.dataframe(df_dados[['Open', 'High', 'Low', 'Close', 'Volume', 'RSI']].tail(10), use_container_width=True)
+            st.markdown("### 📋 Últimos Eventos de Gatilho Detectados")
+            eventos = df_dados[df_dados['Sinal'] != 0].tail(5)
+            if not eventos.empty:
+                st.dataframe(eventos[['Close', 'EMA_9', 'EMA_21', 'RSI']], use_container_width=True)
+            else:
+                st.info("Nenhum cruzamento de média recente no período visível. Ajuste o zoom para ver mais histórico.")
 
         elif modulo_selecionado == "Configurações":
             st.subheader("🛠️ Configurações do Sistema")
