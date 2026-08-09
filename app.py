@@ -123,49 +123,43 @@ if verificar_senha():
 
     st.markdown("---")
 
-    # --- Gerenciamento de Período / Zoom por Botões na Tela ---
-    st.markdown("##### 🔍 Zoom / Período de Análise Rápida")
+    # --- Gerenciamento de Período / Zoom (Atalhos 1m, 5m, 15m) ---
+    st.markdown("##### 🔍 Zoom / Timeframe Rápido")
     col_z1, col_z2, col_z3, col_z4, col_z5 = st.columns(5)
     
-    # Controla o estado do período selecionado
     if "periodo_atual" not in st.session_state:
+        st.session_state.periodo_atual = "1d"
+        st.session_state.intervalo_atual = "1m"
+
+    if col_z1.button("Intraday 1m", use_container_width=True):
+        st.session_state.periodo_atual = "1d"
+        st.session_state.intervalo_atual = "1m"
+        st.rerun()
+    if col_z2.button("Intraday 5m", use_container_width=True):
+        st.session_state.periodo_atual = "1d"
+        st.session_state.intervalo_atual = "5m"
+        st.rerun()
+    if col_z3.button("Intraday 15m", use_container_width=True):
+        st.session_state.periodo_atual = "5d"
+        st.session_state.intervalo_atual = "15m"
+        st.rerun()
+    if col_z4.button("1 Hora (1h)", use_container_width=True):
         st.session_state.periodo_atual = "1mo"
+        st.session_state.intervalo_atual = "1h"
+        st.rerun()
+    if col_z5.button("Diário (1d)", use_container_width=True):
+        st.session_state.periodo_atual = "6mo"
+        st.session_state.intervalo_atual = "1d"
+        st.rerun()
 
-    if col_z1:
-        if col_z1.button("1 Dia (1m)", use_container_width=True):
-            st.session_state.periodo_atual = "1d"
-            st.session_state.intervalo_atual = "1m"
-            st.rerun()
-    if col_z2:
-        if col_z2.button("5 Dias (5m)", use_container_width=True):
-            st.session_state.periodo_atual = "5d"
-            st.session_state.intervalo_atual = "5m"
-            st.rerun()
-    if col_z3:
-        if col_z3.button("1 Mês (1h)", use_container_width=True):
-            st.session_state.periodo_atual = "1mo"
-            st.session_state.intervalo_atual = "1h"
-            st.rerun()
-    if col_z4:
-        if col_z4.button("6 Meses (1d)", use_container_width=True):
-            st.session_state.periodo_atual = "6mo"
-            st.session_state.intervalo_atual = "1d"
-            st.rerun()
-    if col_z5:
-        if col_z5.button("1 Ano (1d)", use_container_width=True):
-            st.session_state.periodo_atual = "1y"
-            st.session_state.intervalo_atual = "1d"
-            st.rerun()
+    periodo = st.session_state.get("periodo_atual", "1d")
+    intervalo = st.session_state.get("intervalo_atual", "1m")
 
-    # Define valores padrão caso não existam no session_state
-    periodo = st.session_state.get("periodo_atual", "1mo")
-    intervalo = st.session_state.get("intervalo_atual", "1h")
-
-    # Carrega dados com base no período selecionado pelos botões
+    # Carrega dados
     df_dados = carregar_dados(ativo_escolhido, periodo, intervalo)
 
     if df_dados is None or df_dados.empty:
-        st.error(f"❌ Não foi possível carregar os dados para o ativo **{ativo_escolhido}** com o período selecionado.")
+        st.error(f"❌ Não foi possível carregar os dados para o ativo **{ativo_escolhido}** no timeframe de {intervalo} (o Yahoo Finance limita dados de 1m aos últimos dias). Tente selecionar 5m, 15m ou 1h.")
     else:
         # Cálculos Técnicos
         df_dados['EMA_9'] = df_dados['Close'].ewm(span=9, adjust=False).mean()
@@ -196,10 +190,10 @@ if verificar_senha():
             col4.metric("IFR (14)", f"{float(df_dados['RSI'].iloc[-1]):.1f}", "Normal")
             
             st.markdown("---")
-            st.info(f"💡 Ativo monitorado: `{ativo_escolhido}`. Utilize os botões de zoom acima para alterar rapidamente o horizonte temporal do gráfico.")
+            st.info(f"💡 Ativo monitorado: `{ativo_escolhido}`. Use os botões acima para alternar entre **1m**, **5m**, **15m** e outros timeframes.")
 
         elif modulo_selecionado == "Gráficos & Análise":
-            st.subheader(f"📈 Gráfico de Candlestick & Indicadores — {ativo_escolhido} (Zoom: {periodo})")
+            st.subheader(f"📈 Gráfico de Candlestick & Indicadores — {ativo_escolhido} [Timeframe: {intervalo}]")
             
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
                                 vertical_spacing=0.03, row_heights=[0.7, 0.3])
@@ -220,6 +214,7 @@ if verificar_senha():
             fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
             fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
 
+            # Habilita o zoom com a roda do mouse (scrollZoom=True)
             fig.update_layout(
                 template='plotly_dark',
                 paper_bgcolor='#0e1117',
@@ -230,7 +225,7 @@ if verificar_senha():
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
             )
 
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
 
         elif modulo_selecionado == "Momentos de Entrada/Saída":
             st.subheader(f"⚡ Gestão de Entradas e Saídas — {ativo_escolhido}")
