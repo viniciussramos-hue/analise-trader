@@ -16,15 +16,12 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- Estilização (Tema Escuro Profissional & Alertas Animados) ---
+# --- Estilização (Mantendo o cabeçalho visível para exibir o botão da sidebar) ---
 st.markdown("""
     <style>
         .stApp {
             background-color: #0e1117;
             color: #fafafa;
-        }
-        header {
-            visibility: hidden;
         }
         div.stMarkdown {
             color: #fafafa;
@@ -254,7 +251,7 @@ if verificar_senha():
 
         # Detecção de Sinais
         df_dados['Sinal'] = 0
-        df_dados.loc[(df_dados['EMA_9'] > df_dados['EMA_21']) & (df_dados['EMA_9'].shift(1) <= df_dados['EMA_21'].shift(1)), 'Sinal'] = 1  
+        df_dados.loc[(df_dados['EMA_9'] > df_dados['EMA_21']) & (df_dados['EMA_9'].shift(1) <= df_dados['EMA_21'].shift(1)), 'Sinal'] = 1 
         df_dados.loc[(df_dados['EMA_9'] < df_dados['EMA_21']) & (df_dados['EMA_9'].shift(1) >= df_dados['EMA_21'].shift(1)), 'Sinal'] = -1 
 
         compras = df_dados[df_dados['Sinal'] == 1]
@@ -292,7 +289,6 @@ if verificar_senha():
             horario_saida_previsto = ultimo_sinal_tempo + timedelta(minutes=multiplicador_minutos * 4)
             horario_saida_str = horario_saida_previsto.strftime('%H:%M')
 
-            # Verifica se o último sinal ocorreu nos últimos 15 minutos (janela de atividade recente)
             diferenca_minutos = (agora_br - ultimo_sinal_tempo.astimezone(fuso_br)).total_seconds() / 60.0
             if abs(diferenca_minutos) <= 15:
                 status_robo_txt = f"🚨 GATILHO ATIVO! Entrada às {horario_entrada_str} | Saída: {horario_saida_str}"
@@ -388,7 +384,6 @@ if verificar_senha():
                 st.write(f"* **Direção do Último Setup:** **{tipo_ultimo_sinal}**")
                 st.write(f"* **Taxa de Acerto (Win Rate):** **{win_rate:.1f}%**")
                 
-                # Botão corrigido para usar o ativo_escolhido atual
                 if st.button("🚀 Executar Ordem Simulada (Paper Trading)", use_container_width=True):
                     nova_ordem = {
                         "Ativo": ativo_escolhido,
