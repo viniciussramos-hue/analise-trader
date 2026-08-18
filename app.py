@@ -103,7 +103,7 @@ def carregar_dados(ticker, periodo, intervalo):
     except Exception:
         return None
 
-# --- Módulo Novo: Consulta Multi-Exchange & Liquidez (Arbitragem) ---
+# --- Consulta Multi-Exchange & Liquidez (Arbitragem) ---
 @st.cache_data(ttl=15)
 def buscar_precos_multi_exchange(crypto_symbol="BTC"):
     """
@@ -167,7 +167,7 @@ def buscar_precos_multi_exchange(crypto_symbol="BTC"):
             "Preço (USDT)": preco,
             "Bid (Compra)": preco,
             "Ask (Venda)": preco,
-            "Volume 24h (USD)": 0.0 # Coinbase pública restringe volume no endpoint simples
+            "Volume 24h (USD)": 0.0 # Restrição da API simples
         })
     except Exception:
         pass
@@ -185,6 +185,35 @@ def buscar_precos_multi_exchange(crypto_symbol="BTC"):
                 "Ask (Venda)": float(item["lowest_ask"]),
                 "Volume 24h (USD)": float(item["quote_volume"])
             })
+    except Exception:
+        pass
+
+    # 6. MEXC
+    try:
+        url = f"https://api.mexc.com/api/v3/ticker/24hr?symbol={symbol_usdt}"
+        res = requests.get(url, timeout=4).json()
+        exchanges_data.append({
+            "Exchange": "MEXC",
+            "Preço (USDT)": float(res["lastPrice"]),
+            "Bid (Compra)": float(res["bidPrice"]),
+            "Ask (Venda)": float(res["askPrice"]),
+            "Volume 24h (USD)": float(res["quoteVolume"])
+        })
+    except Exception:
+        pass
+
+    # 7. OKX
+    try:
+        url = f"https://www.okx.com/api/v5/market/ticker?instId={crypto_symbol.upper()}-USDT"
+        res = requests.get(url, timeout=4).json()
+        item = res["data"][0]
+        exchanges_data.append({
+            "Exchange": "OKX",
+            "Preço (USDT)": float(item["last"]),
+            "Bid (Compra)": float(item["bidPx"]),
+            "Ask (Venda)": float(item["askPx"]),
+            "Volume 24h (USD)": float(item["volCcy24h"])
+        })
     except Exception:
         pass
 
@@ -286,191 +315,253 @@ if verificar_senha():
 
     st.markdown("---")
 
-    # Timeframe Controls
-    st.markdown("##### ⏱️ Timeframe para Análise Institucional Avançada")
-    col_t1, col_t2, col_t3, col_t4, col_t5, col_t6 = st.columns(6)
-    
-    if "intervalo_escolhido" not in st.session_state:
-        st.session_state.intervalo_escolhido = "1m"
-        st.session_state.periodo_escolhido = "1d"
-
-    if col_t1.button("1 Minuto", use_container_width=True):
-        st.session_state.intervalo_escolhido = "1m"
-        st.session_state.periodo_escolhido = "1d"
-        st.rerun()
-    if col_t2.button("5 Minutos", use_container_width=True):
-        st.session_state.intervalo_escolhido = "5m"
-        st.session_state.periodo_escolhido = "1d"
-        st.rerun()
-    if col_t3.button("15 Minutos", use_container_width=True):
-        st.session_state.intervalo_escolhido = "15m"
-        st.session_state.periodo_escolhido = "5d"
-        st.rerun()
-    if col_t4.button("30 Minutos", use_container_width=True):
-        st.session_state.intervalo_escolhido = "30m"
-        st.session_state.periodo_escolhido = "5d"
-        st.rerun()
-    if col_t5.button("1 Hora", use_container_width=True):
-        st.session_state.intervalo_escolhido = "1h"
-        st.session_state.periodo_escolhido = "1mo"
-        st.rerun()
-    if col_t6.button("Diário", use_container_width=True):
-        st.session_state.intervalo_escolhido = "1d"
-        st.session_state.periodo_escolhido = "6mo"
-        st.rerun()
-
-    intervalo = st.session_state.get("intervalo_escolhido", "1m")
-    periodo = st.session_state.get("periodo_escolhido", "1d")
-
-    df_dados = carregar_dados(ativo_escolhido, periodo, intervalo)
-
-    if df_dados is None or df_dados.empty:
-        st.error(f"❌ Não há dados disponíveis para **{ativo_escolhido}** no timeframe de **{intervalo}**.")
-    else:
-        # Indicadores Técnicos
-        df_dados['EMA_9'] = df_dados['Close'].ewm(span=9, adjust=False).mean()
-        df_dados['EMA_21'] = df_dados['Close'].ewm(span=21, adjust=False).mean()
-        df_dados['Vol_Media'] = df_dados['Volume'].rolling(window=20).mean()
-        df_dados['Vol_Spike'] = df_dados['Volume'] > (df_dados['Vol_Media'] * 1.5)
+    # =========================================================================
+    # LÓGICA DE EXIBIÇÃO: Oculta o Timeframe na Arbitragem e Configurações
+    # =========================================================================
+    if modulo_selecionado in ["Visão Geral", "Gráficos & Análise", "Momentos de Entrada/Saída"]:
         
-        delta = df_dados['Close'].diff()
-        ganho = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        perda = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = ganho / perda
-        df_dados['RSI'] = 100 - (100 / (1 + rs))
-
-        # Sinais de Cruzamento
-        df_dados['Sinal'] = 0
-        df_dados.loc[(df_dados['EMA_9'] > df_dados['EMA_21']) & (df_dados['EMA_9'].shift(1) <= df_dados['EMA_21'].shift(1)), 'Sinal'] = 1 
-        df_dados.loc[(df_dados['EMA_9'] < df_dados['EMA_21']) & (df_dados['EMA_9'].shift(1) >= df_dados['EMA_21'].shift(1)), 'Sinal'] = -1 
-
-        compras = df_dados[df_dados['Sinal'] == 1]
-        vendas = df_dados[df_dados['Sinal'] == -1]
-
-        preco_atual = float(df_dados['Close'].iloc[-1])
-        preco_anterior = float(df_dados['Close'].iloc[-2])
-        variacao_pct = ((preco_atual - preco_anterior) / preco_anterior) * 100
+        # Timeframe Controls
+        st.markdown("##### ⏱️ Timeframe para Análise Institucional Avançada")
+        col_t1, col_t2, col_t3, col_t4, col_t5, col_t6 = st.columns(6)
         
-        ema9_atual = float(df_dados['EMA_9'].iloc[-1])
-        ema21_atual = float(df_dados['EMA_21'].iloc[-1])
+        if "intervalo_escolhido" not in st.session_state:
+            st.session_state.intervalo_escolhido = "1m"
+            st.session_state.periodo_escolhido = "1d"
 
-        # Win Rate
-        total_sinais = len(df_dados[df_dados['Sinal'] != 0])
-        if total_sinais > 0:
-            df_dados['Retorno_Futuro'] = df_dados['Close'].shift(-3) - df_dados['Close']
-            df_dados['Acerto'] = ((df_dados['Sinal'] == 1) & (df_dados['Retorno_Futuro'] > 0)) | ((df_dados['Sinal'] == -1) & (df_dados['Retorno_Futuro'] < 0))
-            win_rate = (df_dados['Acerto'].sum() / total_sinais) * 100
+        if col_t1.button("1 Minuto", use_container_width=True):
+            st.session_state.intervalo_escolhido = "1m"
+            st.session_state.periodo_escolhido = "1d"
+            st.rerun()
+        if col_t2.button("5 Minutos", use_container_width=True):
+            st.session_state.intervalo_escolhido = "5m"
+            st.session_state.periodo_escolhido = "1d"
+            st.rerun()
+        if col_t3.button("15 Minutos", use_container_width=True):
+            st.session_state.intervalo_escolhido = "15m"
+            st.session_state.periodo_escolhido = "5d"
+            st.rerun()
+        if col_t4.button("30 Minutos", use_container_width=True):
+            st.session_state.intervalo_escolhido = "30m"
+            st.session_state.periodo_escolhido = "5d"
+            st.rerun()
+        if col_t5.button("1 Hora", use_container_width=True):
+            st.session_state.intervalo_escolhido = "1h"
+            st.session_state.periodo_escolhido = "1mo"
+            st.rerun()
+        if col_t6.button("Diário", use_container_width=True):
+            st.session_state.intervalo_escolhido = "1d"
+            st.session_state.periodo_escolhido = "6mo"
+            st.rerun()
+
+        intervalo = st.session_state.get("intervalo_escolhido", "1m")
+        periodo = st.session_state.get("periodo_escolhido", "1d")
+
+        df_dados = carregar_dados(ativo_escolhido, periodo, intervalo)
+
+        if df_dados is None or df_dados.empty:
+            st.error(f"❌ Não há dados disponíveis para **{ativo_escolhido}** no timeframe de **{intervalo}**.")
         else:
-            win_rate = 50.0
-
-        # Verificação do Robô
-        sinais_existentes = df_dados[df_dados['Sinal'] != 0]
-        if not sinais_existentes.empty:
-            ultimo_sinal_tempo = sinais_existentes.index[-1]
-            tipo_ultimo_sinal = "COMPRA (Call)" if sinais_existentes['Sinal'].iloc[-1] == 1 else "VENDA (Put)"
-            horario_entrada_str = ultimo_sinal_tempo.strftime('%H:%M')
-            diferenca_minutos = (agora_br - ultimo_sinal_tempo.astimezone(fuso_br)).total_seconds() / 60.0
+            # Indicadores Técnicos
+            df_dados['EMA_9'] = df_dados['Close'].ewm(span=9, adjust=False).mean()
+            df_dados['EMA_21'] = df_dados['Close'].ewm(span=21, adjust=False).mean()
+            df_dados['Vol_Media'] = df_dados['Volume'].rolling(window=20).mean()
+            df_dados['Vol_Spike'] = df_dados['Volume'] > (df_dados['Vol_Media'] * 1.5)
             
-            if abs(diferenca_minutos) <= 15:
-                status_robo_txt = f"🚨 GATILHO ATIVO! Entrada às {horario_entrada_str}"
-                robô_buscando = True
+            delta = df_dados['Close'].diff()
+            ganho = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            perda = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = ganho / perda
+            df_dados['RSI'] = 100 - (100 / (1 + rs))
+
+            # Sinais de Cruzamento
+            df_dados['Sinal'] = 0
+            df_dados.loc[(df_dados['EMA_9'] > df_dados['EMA_21']) & (df_dados['EMA_9'].shift(1) <= df_dados['EMA_21'].shift(1)), 'Sinal'] = 1 
+            df_dados.loc[(df_dados['EMA_9'] < df_dados['EMA_21']) & (df_dados['EMA_9'].shift(1) >= df_dados['EMA_21'].shift(1)), 'Sinal'] = -1 
+
+            compras = df_dados[df_dados['Sinal'] == 1]
+            vendas = df_dados[df_dados['Sinal'] == -1]
+
+            preco_atual = float(df_dados['Close'].iloc[-1])
+            preco_anterior = float(df_dados['Close'].iloc[-2])
+            variacao_pct = ((preco_atual - preco_anterior) / preco_anterior) * 100
+            
+            ema9_atual = float(df_dados['EMA_9'].iloc[-1])
+            ema21_atual = float(df_dados['EMA_21'].iloc[-1])
+
+            # Win Rate
+            total_sinais = len(df_dados[df_dados['Sinal'] != 0])
+            if total_sinais > 0:
+                df_dados['Retorno_Futuro'] = df_dados['Close'].shift(-3) - df_dados['Close']
+                df_dados['Acerto'] = ((df_dados['Sinal'] == 1) & (df_dados['Retorno_Futuro'] > 0)) | ((df_dados['Sinal'] == -1) & (df_dados['Retorno_Futuro'] < 0))
+                win_rate = (df_dados['Acerto'].sum() / total_sinais) * 100
             else:
-                status_robo_txt = f"🔍 Robô em varredura (Último sinal às {horario_entrada_str})"
+                win_rate = 50.0
+
+            # Verificação do Robô
+            sinais_existentes = df_dados[df_dados['Sinal'] != 0]
+            if not sinais_existentes.empty:
+                ultimo_sinal_tempo = sinais_existentes.index[-1]
+                tipo_ultimo_sinal = "COMPRA (Call)" if sinais_existentes['Sinal'].iloc[-1] == 1 else "VENDA (Put)"
+                horario_entrada_str = ultimo_sinal_tempo.strftime('%H:%M')
+                diferenca_minutos = (agora_br - ultimo_sinal_tempo.astimezone(fuso_br)).total_seconds() / 60.0
+                
+                if abs(diferenca_minutos) <= 15:
+                    status_robo_txt = f"🚨 GATILHO ATIVO! Entrada às {horario_entrada_str}"
+                    robô_buscando = True
+                else:
+                    status_robo_txt = f"🔍 Robô em varredura (Último sinal às {horario_entrada_str})"
+                    robô_buscando = False
+            else:
+                tipo_ultimo_sinal = "Neutro"
+                status_robo_txt = "🔍 Robô escaneando o mercado..."
                 robô_buscando = False
-        else:
-            tipo_ultimo_sinal = "Neutro"
-            status_robo_txt = "🔍 Robô escaneando o mercado..."
-            robô_buscando = False
 
-        # --- NAVEGAÇÃO ENTRE MÓDULOS ---
-        
-        if modulo_selecionado == "Visão Geral":
-            st.subheader(f"Visão Geral do Ativo: {ativo_escolhido}")
-            
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Preço / Cotação (BRT)", f"{preco_atual:.4f}", f"{variacao_pct:.2f}%")
-            col2.metric("Status do Robô", "Buscando Entradas" if robô_buscando else "Varredura Ativa", "Monitorando")
-            col3.metric("Tendência Atual", "Alta" if ema9_atual > ema21_atual else "Baixa", "EMA 9/21")
-            col4.metric("Assertividade", f"{win_rate:.1f}%", "Histórico")
-            
-            st.markdown("---")
-            st.info(f"💡 **Status de Varredura:** `{status_robo_txt}`")
+            # --- RENDERIZAÇÃO DOS MÓDULOS TÉCNICOS ---
+            if modulo_selecionado == "Visão Geral":
+                st.subheader(f"Visão Geral do Ativo: {ativo_escolhido}")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Preço / Cotação (BRT)", f"{preco_atual:.4f}", f"{variacao_pct:.2f}%")
+                col2.metric("Status do Robô", "Buscando Entradas" if robô_buscando else "Varredura Ativa", "Monitorando")
+                col3.metric("Tendência Atual", "Alta" if ema9_atual > ema21_atual else "Baixa", "EMA 9/21")
+                col4.metric("Assertividade", f"{win_rate:.1f}%", "Histórico")
+                
+                st.markdown("---")
+                st.info(f"💡 **Status de Varredura:** `{status_robo_txt}`")
 
-        elif modulo_selecionado == "Gráficos & Análise":
-            st.subheader(f"📈 Gráfico Institucional Avançado — {ativo_escolhido} [{intervalo}]")
-            
-            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
-                                vertical_spacing=0.03, row_heights=[0.7, 0.3])
+            elif modulo_selecionado == "Gráficos & Análise":
+                st.subheader(f"📈 Gráfico Institucional Avançado — {ativo_escolhido} [{intervalo}]")
+                
+                fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
+                                    vertical_spacing=0.03, row_heights=[0.7, 0.3])
 
-            fig.add_trace(go.Candlestick(
-                x=df_dados.index, open=df_dados['Open'], high=df_dados['High'],
-                low=df_dados['Low'], close=df_dados['Close'], name='Candles'
-            ), row=1, col=1)
-
-            fig.add_trace(go.Scatter(x=df_dados.index, y=df_dados['EMA_9'], line=dict(color='#00ffcc', width=1.5), name='EMA 9'), row=1, col=1)
-            fig.add_trace(go.Scatter(x=df_dados.index, y=df_dados['EMA_21'], line=dict(color='#ff00ff', width=1.5), name='EMA 21'), row=1, col=1)
-
-            if not compras.empty:
-                fig.add_trace(go.Scatter(
-                    x=compras.index, y=compras['Low'] * 0.995, mode='markers+text',
-                    text=[t.strftime('%H:%M') for t in compras.index], textposition="bottom center",
-                    marker=dict(symbol='triangle-up', size=14, color='#00FF00'), name='Entrada Compra'
+                fig.add_trace(go.Candlestick(
+                    x=df_dados.index, open=df_dados['Open'], high=df_dados['High'],
+                    low=df_dados['Low'], close=df_dados['Close'], name='Candles'
                 ), row=1, col=1)
 
-            if not vendas.empty:
-                fig.add_trace(go.Scatter(
-                    x=vendas.index, y=vendas['High'] * 1.005, mode='markers+text',
-                    text=[t.strftime('%H:%M') for t in vendas.index], textposition="top center",
-                    marker=dict(symbol='triangle-down', size=14, color='#FF0000'), name='Entrada Venda'
-                ), row=1, col=1)
+                fig.add_trace(go.Scatter(x=df_dados.index, y=df_dados['EMA_9'], line=dict(color='#00ffcc', width=1.5), name='EMA 9'), row=1, col=1)
+                fig.add_trace(go.Scatter(x=df_dados.index, y=df_dados['EMA_21'], line=dict(color='#ff00ff', width=1.5), name='EMA 21'), row=1, col=1)
 
-            fig.add_trace(go.Scatter(x=df_dados.index, y=df_dados['RSI'], line=dict(color='#ffa500', width=1.5), name='RSI (14)'), row=2, col=1)
-            fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-            fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+                if not compras.empty:
+                    fig.add_trace(go.Scatter(
+                        x=compras.index, y=compras['Low'] * 0.995, mode='markers+text',
+                        text=[t.strftime('%H:%M') for t in compras.index], textposition="bottom center",
+                        marker=dict(symbol='triangle-up', size=14, color='#00FF00'), name='Entrada Compra'
+                    ), row=1, col=1)
 
-            fig.update_layout(
-                template='plotly_dark', paper_bgcolor='#0e1117', plot_bgcolor='#0e1117',
-                xaxis_rangeslider_visible=False, height=550, margin=dict(l=10, r=10, t=10, b=10)
+                if not vendas.empty:
+                    fig.add_trace(go.Scatter(
+                        x=vendas.index, y=vendas['High'] * 1.005, mode='markers+text',
+                        text=[t.strftime('%H:%M') for t in vendas.index], textposition="top center",
+                        marker=dict(symbol='triangle-down', size=14, color='#FF0000'), name='Entrada Venda'
+                    ), row=1, col=1)
+
+                fig.add_trace(go.Scatter(x=df_dados.index, y=df_dados['RSI'], line=dict(color='#ffa500', width=1.5), name='RSI (14)'), row=2, col=1)
+                fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
+                fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+
+                fig.update_layout(
+                    template='plotly_dark', paper_bgcolor='#0e1117', plot_bgcolor='#0e1117',
+                    xaxis_rangeslider_visible=False, height=550, margin=dict(l=10, r=10, t=10, b=10)
+                )
+
+                st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
+
+            elif modulo_selecionado == "Momentos de Entrada/Saída":
+                st.subheader(f"⚡ Gestão Inteligente, Simulador e Risco — {ativo_escolhido}")
+                col_s1, col_s2 = st.columns(2)
+                
+                with col_s1:
+                    st.markdown("### 🤖 Robô Analisador & Varredura de Mercado")
+                    st.write(f"* **Status do Mercado:** {status_mercado_txt}")
+                    st.markdown(f'<div class="buscando-status">{status_robo_txt}</div>', unsafe_allow_html=True)
+                    st.write(f"* **Direção do Último Setup:** **{tipo_ultimo_sinal}**")
+                    st.write(f"* **Taxa de Acerto (Win Rate):** **{win_rate:.1f}%**")
+                    
+                    if st.button("🚀 Executar Ordem Simulada (Paper Trading)", use_container_width=True):
+                        nova_ordem = {
+                            "Ativo": ativo_escolhido,
+                            "Tipo": tipo_ultimo_sinal,
+                            "Entrada": preco_atual,
+                            "Horário": agora_br.strftime("%H:%M:%S"),
+                            "Status": "Aberta (Simulada)"
+                        }
+                        st.session_state.historico_ordens.append(nova_ordem)
+                        st.success(f"✅ Ordem simulada para **{ativo_escolhido}** registrada com sucesso!")
+
+                with col_s2:
+                    st.markdown("### 🎯 Calculadora de Risco x Retorno")
+                    preco_stop = preco_atual * (1 - stop_loss_pct / 100) if "COMPRA" in tipo_ultimo_sinal else preco_atual * (1 + stop_loss_pct / 100)
+                    preco_alvo = preco_atual * (1 + alvo_fib_gain / 100) if "COMPRA" in tipo_ultimo_sinal else preco_atual * (1 - alvo_fib_gain / 100)
+                    
+                    st.metric("Preço Atual", f"{preco_atual:.4f}")
+                    st.metric(f"Stop Loss ({stop_loss_pct}%)", f"{preco_stop:.4f}")
+                    st.metric(f"Take Profit Alvo ({alvo_fib_gain}%)", f"{preco_alvo:.4f}")
+                    st.info(f"💼 Risco configurado: R$ {capital_risco:.2f} por operação.")
+
+                st.markdown("---")
+                st.markdown("### 📂 Carteira de Paper Trading (Ordens Simuladas)")
+                if len(st.session_state.historico_ordens) > 0:
+                    df_ordens = pd.DataFrame(st.session_state.historico_ordens)
+                    st.dataframe(df_ordens, use_container_width=True)
+                else:
+                    st.info("Nenhuma ordem simulada aberta no momento.")
+
+    # =========================================================================
+    # MÓDULO DE ARBITRAGEM (Sem Timeframe)
+    # =========================================================================
+    elif modulo_selecionado == "Arbitragem & Liquidez Cripto":
+        st.subheader("🌐 Comparador de Preços Multi-Exchange & Liquidez")
+        st.markdown("Este módulo consulta os preços e volumes em tempo real nas principais corretoras globais para encontrar **oportunidades de arbitragem**.")
+
+        symbol_raw = ativo_escolhido.split("-")[0].replace(".SA", "").replace("=X", "")
+        if categoria != "Criptomoedas":
+            symbol_raw = "BTC"
+            st.warning("⚠️ O ativo selecionado no painel lateral não é uma Criptomoeda. Exibindo dados de **BTC** por padrão.")
+
+        # Criação da lista suspensa (Dropdown) de criptomoedas
+        lista_criptos = ["BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "AVAX", "LINK", "MATIC", "DOT", "LTC", "SHIB"]
+        if symbol_raw not in lista_criptos:
+            lista_criptos.insert(0, symbol_raw)
+
+        col_search1, col_search2 = st.columns([3, 1])
+        with col_search1:
+            cripto_busca = st.selectbox(
+                "Selecione a Criptomoeda (Base: USDT)", 
+                options=lista_criptos,
+                index=lista_criptos.index(symbol_raw)
             )
+        with col_search2:
+            taxa_estimada = st.number_input("Taxa de Transferência/Trading Est. (%)", value=0.2, step=0.05)
 
-            st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
+        with st.spinner(f"Buscando cotações de {cripto_busca} em exchanges globais..."):
+            df_exchanges = buscar_precos_multi_exchange(cripto_busca)
 
-        # --- NOVO MÓDULO: ARBITRAGEM E MAIOR LIQUIDEZ ---
-        elif modulo_selecionado == "Arbitragem & Liquidez Cripto":
-            st.subheader("🌐 Comparador de Preços Multi-Exchange & Liquidez")
-            st.markdown("Este módulo consulta os preços e volumes em tempo real nas principais corretoras globais para encontrar **oportunidades de arbitragem** (comprar mais barato em uma exchange e vender mais caro em outra).")
+        if df_exchanges.empty:
+            st.error("Não foi possível obter dados das exchanges no momento. Verifique a conexão com a internet.")
+        else:
+            # Identifica maior liquidez (volume)
+            idx_maior_volume = df_exchanges["Volume 24h (USD)"].idxmax()
+            exc_maior_liquidez = df_exchanges.loc[idx_maior_volume]
 
-            symbol_raw = ativo_escolhido.split("-")[0].replace(".SA", "").replace("=X", "")
-            if categoria != "Criptomoedas":
-                symbol_raw = "BTC"
-                st.warning("⚠️ Ativo selecionado não é uma criptomoeda. Exibindo dados de **BTC** por padrão.")
-
-            col_search1, col_search2 = st.columns([3, 1])
-            with col_search1:
-                cripto_busca = st.text_input("Símbolo da Criptomoeda (Ex: BTC, ETH, SOL, XRP, DOGE)", value=symbol_raw).upper()
-            with col_search2:
-                taxa_estimada = st.number_input("Taxa de Transferência/Trading Est. (%)", value=0.2, step=0.05)
-
-            with st.spinner(f"Buscando cotações de {cripto_busca} em exchanges globais..."):
-                df_exchanges = buscar_precos_multi_exchange(cripto_busca)
-
-            if df_exchanges.empty:
-                st.error("Não foi possível obter dados das exchanges no momento. Verifique a conexão com a internet.")
-            else:
-                # Identifica maior liquidez (volume)
-                idx_maior_volume = df_exchanges["Volume 24h (USD)"].idxmax()
-                exc_maior_liquidez = df_exchanges.loc[idx_maior_volume]
-
-                # Identifica Menor Preço de Venda (Ask) para Comprar
-                df_valid_ask = df_exchanges[df_exchanges["Ask (Venda)"] > 0]
+            # Identifica Menor Preço de Venda (Ask) para Comprar
+            df_valid_ask = df_exchanges[df_exchanges["Ask (Venda)"] > 0]
+            if not df_valid_ask.empty:
                 idx_menor_ask = df_valid_ask["Ask (Venda)"].idxmin()
                 exc_menor_compra = df_valid_ask.loc[idx_menor_ask]
+            else:
+                exc_menor_compra = None
 
-                # Identifica Maior Preço de Compra (Bid) para Vender
-                df_valid_bid = df_exchanges[df_exchanges["Bid (Compra)"] > 0]
+            # Identifica Maior Preço de Compra (Bid) para Vender
+            df_valid_bid = df_exchanges[df_exchanges["Bid (Compra)"] > 0]
+            if not df_valid_bid.empty:
                 idx_maior_bid = df_valid_bid["Bid (Compra)"].idxmax()
                 exc_maior_venda = df_valid_bid.loc[idx_maior_bid]
+            else:
+                exc_maior_venda = None
 
+            if exc_menor_compra is not None and exc_maior_venda is not None:
                 # Lucro de Arbitragem
                 preco_compra = exc_menor_compra["Ask (Venda)"]
                 preco_venda = exc_maior_venda["Bid (Compra)"]
@@ -524,60 +615,23 @@ if verificar_senha():
                 else:
                     st.info(f"ℹ️ **Spread Atual entre exchanges:** {spread_bruto_pct:.2f}% (Sem oportunidade líquida relevante após as taxas de {taxa_estimada}%).")
 
-                st.markdown("### 📋 Tabela Comparativa de Exchanges")
-                
-                # Formatando para exibição limpa
-                df_show = df_exchanges.copy()
-                df_show["Preço (USDT)"] = df_show["Preço (USDT)"].map("${:,.4f}".format)
-                df_show["Bid (Compra)"] = df_show["Bid (Compra)"].map("${:,.4f}".format)
-                df_show["Ask (Venda)"] = df_show["Ask (Venda)"].map("${:,.4f}".format)
-                df_show["Volume 24h (USD)"] = df_show["Volume 24h (USD)"].map("${:,.0f}".format)
-
-                st.dataframe(df_show, use_container_width=True)
-
-        elif modulo_selecionado == "Momentos de Entrada/Saída":
-            st.subheader(f"⚡ Gestão Inteligente, Simulador e Risco — {ativo_escolhido}")
-            col_s1, col_s2 = st.columns(2)
+            st.markdown("### 📋 Tabela Comparativa de Exchanges")
             
-            with col_s1:
-                st.markdown("### 🤖 Robô Analisador & Varredura de Mercado")
-                st.write(f"* **Status do Mercado:** {status_mercado_txt}")
-                st.markdown(f'<div class="buscando-status">{status_robo_txt}</div>', unsafe_allow_html=True)
-                st.write(f"* **Direção do Último Setup:** **{tipo_ultimo_sinal}**")
-                st.write(f"* **Taxa de Acerto (Win Rate):** **{win_rate:.1f}%**")
-                
-                if st.button("🚀 Executar Ordem Simulada (Paper Trading)", use_container_width=True):
-                    nova_ordem = {
-                        "Ativo": ativo_escolhido,
-                        "Tipo": tipo_ultimo_sinal,
-                        "Entrada": preco_atual,
-                        "Horário": agora_br.strftime("%H:%M:%S"),
-                        "Status": "Aberta (Simulada)"
-                    }
-                    st.session_state.historico_ordens.append(nova_ordem)
-                    st.success(f"✅ Ordem simulada para **{ativo_escolhido}** registrada com sucesso!")
+            # Formatando para exibição limpa
+            df_show = df_exchanges.copy()
+            df_show["Preço (USDT)"] = df_show["Preço (USDT)"].map("${:,.4f}".format)
+            df_show["Bid (Compra)"] = df_show["Bid (Compra)"].map("${:,.4f}".format)
+            df_show["Ask (Venda)"] = df_show["Ask (Venda)"].map("${:,.4f}".format)
+            df_show["Volume 24h (USD)"] = df_show["Volume 24h (USD)"].map("${:,.0f}".format)
 
-            with col_s2:
-                st.markdown("### 🎯 Calculadora de Risco x Retorno")
-                preco_stop = preco_atual * (1 - stop_loss_pct / 100) if "COMPRA" in tipo_ultimo_sinal else preco_atual * (1 + stop_loss_pct / 100)
-                preco_alvo = preco_atual * (1 + alvo_fib_gain / 100) if "COMPRA" in tipo_ultimo_sinal else preco_atual * (1 - alvo_fib_gain / 100)
-                
-                st.metric("Preço Atual", f"{preco_atual:.4f}")
-                st.metric(f"Stop Loss ({stop_loss_pct}%)", f"{preco_stop:.4f}")
-                st.metric(f"Take Profit Alvo ({alvo_fib_gain}%)", f"{preco_alvo:.4f}")
-                st.info(f"💼 Risco configurado: R$ {capital_risco:.2f} por operação.")
+            st.dataframe(df_show, use_container_width=True)
 
-            st.markdown("---")
-            st.markdown("### 📂 Carteira de Paper Trading (Ordens Simuladas)")
-            if len(st.session_state.historico_ordens) > 0:
-                df_ordens = pd.DataFrame(st.session_state.historico_ordens)
-                st.dataframe(df_ordens, use_container_width=True)
-            else:
-                st.info("Nenhuma ordem simulada aberta no momento.")
-
-        elif modulo_selecionado == "Configurações":
-            st.subheader("🛠️ Configurações do Sistema & Conexões")
-            st.write("Gerencie parâmetros avançados de conexão e chaves de API.")
-            st.text_input("Chave API (Opcional para dados avançados)", type="password", value="************************")
-            st.text_input("Webhook Telegram/Discord para Alertas", value=webhook_url, placeholder="Insira o link do webhook aqui")
-            st.success("Configurações salvas localmente com sucesso.")
+    # =========================================================================
+    # MÓDULO DE CONFIGURAÇÕES (Sem Timeframe)
+    # =========================================================================
+    elif modulo_selecionado == "Configurações":
+        st.subheader("🛠️ Configurações do Sistema & Conexões")
+        st.write("Gerencie parâmetros avançados de conexão e chaves de API.")
+        st.text_input("Chave API (Opcional para dados avançados)", type="password", value="************************")
+        st.text_input("Webhook Telegram/Discord para Alertas", value=webhook_url, placeholder="Insira o link do webhook aqui")
+        st.success("Configurações salvas localmente com sucesso.")
